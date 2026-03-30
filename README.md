@@ -1,5 +1,5 @@
 # Ubuntu Touch For The Galaxy Note 10+ d2s (Exynos 9825)
-	< PORTED BY DUCK INC. (Eithan Asulin) >
+	< PORTED BY DUCK TOOLS (Eithan Asulin) >
 	< GitHub : https://github.com/EithanAsulin >
 	< Device : Samsung Galaxy Note 10+ Codename D2s >
 
