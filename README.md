@@ -1,76 +1,83 @@
-# Ubuntu Touch For The Galaxy Note 10+ d2s (Exynos 9825)
-	< PORTED BY DUCK TOOLS (Eithan Asulin) >
-	< GitHub : https://github.com/EithanAsulin >
-	< Device : Samsung Galaxy Note 10+ Codename D2s >
+# Ubuntu Touch Device Tree for the Samsung Galaxy Note 10+ (Exynos 9825/N975F)
 
-# IMPORTANT
-> ------------------------------------------------------------------------------------------------------------------------------------
-If Anything Goes Unexpected And Causes a Brick I Am Not In Fault This Was Tested And Used On The N975F With Mostly Working Features.
+> Any damage such as bricking or data loss is the responsibility of the user. This port was tested successfully on a clean install and is not recommended for daily use.
+This repository contains the device tree for the Samsung Galaxy Note 10+ (Exynos 9825/N975F) running Ubuntu Touch 20.04 (Focal)
 
-!!! DO NOT EXPECT UPDATES THIS IS NOT AN OFFICIAL PORT !!! 
-> ------------------------------------------------------------------------------------------------------------------------------------
+If you'd like to contribute, please open an issue or submit a pull request it'd be really helpful to get more testing on devices like the d2x (Samsung Galaxy Note 10+ 5G).
 
-Hello!
-This Is The Finished Result Of Compiling The Exynos 9825 Ubuntu Touch Build.
+## What works:
+[X] SSH
 
-(Source : https://gitlab.com/ubports/porting/community-ports/android11/samsung-galaxy-note-10-plus/samsung-exynos9825)
+[X] USB tethering/MTP
 
-# Installation :
+[X] Display
 
-# Pre Installation
+[X] Touchscreen
 
-# 1. Get Fastboot
-> sudo apt update && sudo apt install fastboot
+[X] Audio
 
-# 2. Download Files
-> Releases > Ubuntu_Touch_d2s.zip > Extract
+[X] Hardware acceleration
 
-# 3. Terminal
-> In The Extracted Folder Open a Terminal
- 
-# 1. Downloads Mode
-> sudo ./odin4 -a TWRP.tar
+[X] basic X11 app support
 
-> (This TWRP Is The EternityROM One UI 7 For Improved Stability)
+[X] Internal storage
 
-# 2. Enter TWRP (Volume Up + Power 7 Seconds)
-> Wipe > Format Data > "yes"
+[X] Battery (Charging state, Level)
 
-> Reboot > Fastboot (Also Known As Fastbootd)
+[X] OpenStore Apps
 
-# 3. Fastboot Flash (sudo apt install fastboot)
-> fastboot flash boot boot.img
+[X] I/O devices (Mouse, Keyboard tested)
 
-> fastboot flash system system.img
+[X] S Pen
 
-> fastboot flash vendor vendor.img
+[X] 24 Hour test
 
-# 4. Reboot
-> Enjoy You've Succesfully Booted Into Ubuntu Touch 16.04 Xenial
+[X] 7 Day test
 
-> ------------------------------------------------------------------------------------------------------------------------------------
+[ ] Waydroid
 
+[ ] Haptics (Do work but cause a bootloop after some times, fails 24 hour test.)
 
-# OS Info :
-> OS : Ubuntu Touch
+[ ] Camera
 
-> Version : 16.04
+[ ] Weather App
 
-> Codename : Xenial
+## Not tested:
+[ ] VoLTE
+[ ] VoWiFi
+[ ] Messaging
+[ ] External storage
 
-> Snapd : No
-
-> Stable : Yes
-
-> Usable : Partial (App Support)
+- **Conclusion:** This device tree is a work in progress, not ready for daily use and isn't recommended. (Due to waydroid)
 
 
+# How to flash:
+***THIS REQUIRES A LINUX HOST, DO NOT TRY ON MACOS, FREEBSD, UNIX, WINDOWS***
+To begin clone the repository
+```sh
+git clone https://github.com/EithanAsulin/Ubuntu-Touch-Exynos9825.git
+cd Ubuntu-Touch-Exynos9825
+```
 
-# Bug Fixes :
+After cloning, run the following commands to build a sideload-able zip for android recovery
+```sh
+./build.sh -b workdir
+./scripts/prepare-focal-ota.sh
+./scripts/build-focal-images.sh
+./scripts/verify-artifacts.sh
+./scripts/make-adb-sideload-zip.sh
+```
 
-# Screen Not Responding To Touch?
-> Turn It Off For a Second And The Touch Will Come Back
+This should take about ~30 Minutes on a mid-range Linux host.
 
-# apt install Fails?
-> Ubuntu Touch Locks APT Access And Even If You Have It The Libraries Are Too Old Use Libertine And Deb Files.
+It's recommended to use a LineageOS/Evolution X android 16 base ROM before flashing this zip, For this step you must of already flashed atleast a LineageOS/Evolution X recovery image.
 
+
+
+# Acknowledgements
+- UBports `samsung-exynos9820` Halium 12 Adaption
+- UBports `samsung-exynos9820` Kernel
+- UBports porting tools
+
+# Disclaimer
+As a single developer working on this project with near 0 info for the exynos 9825 **Generative AI Was used to assist and to speed up research and development.** i understand how people may find this disrespectful with a project like ubuntu touch which focuses on a more human-only approach and felt that this must be mentioned.
