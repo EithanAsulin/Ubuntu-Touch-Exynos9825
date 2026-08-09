@@ -5,7 +5,6 @@ workdir/
 ota/
 ota-focal/
 images/
-images-focal/
 keys/
 /ramdisk-overlay/scripts/halium
 /release/
