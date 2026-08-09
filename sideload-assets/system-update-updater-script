@@ -1,0 +1,30 @@
+assert(getprop("ro.product.device") == "d2s" ||
+       getprop("ro.build.product") == "d2s" ||
+       abort("E3004: This package is only for Samsung d2s."));
+assert(getprop("ro.boot.em.model") == "SM-N975F" ||
+       abort("E3004: This package is only for SM-N975F."));
+
+ui_print("");
+ui_print("Ubuntu Touch Focal D2S RC2 system-image update");
+ui_print("Writes the rebuilt SYSTEM image only");
+ui_print("USERDATA, BOOT, VENDOR, RECOVERY, MODEM and EFS are preserved");
+ui_print("");
+
+assert(run_program("/system/bin/sh", "-c",
+       "test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/system)\" = 6502219776 && ! grep -q '^/dev/block/platform/13d60000.ufs/by-name/system ' /proc/mounts && ! grep -q ' /system ' /proc/mounts && ! grep -q ' /system_root ' /proc/mounts") == 0 ||
+       abort("E1001: SYSTEM geometry mismatch or partition is mounted."));
+
+show_progress(0.990000, 0);
+ui_print("Writing the verified rebuilt Ubuntu Touch SYSTEM image...");
+assert(package_extract_file("ubuntu.img",
+       "/dev/block/platform/13d60000.ufs/by-name/system") ||
+       abort("E1001: Failed to write physical SYSTEM."));
+
+assert(run_program("/system/bin/sh", "-c", "sync") == 0 ||
+       abort("E1001: Failed to synchronize the SYSTEM write."));
+
+set_progress(1.000000);
+ui_print("");
+ui_print("RC2 SYSTEM update complete; USERDATA was not changed.");
+ui_print("Reboot directly into Ubuntu Touch.");
+ui_print("");

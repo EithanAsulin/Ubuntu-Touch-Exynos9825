@@ -1,0 +1,26 @@
+#!/bin/sh
+set -u
+
+output=/home/phablet/waydroid-separate-binder-live-logcat.txt
+rm -f "$output"
+
+attempt=0
+while [ "$attempt" -lt 120 ]; do
+    if [ "$(lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH 2>/dev/null)" = RUNNING ] && \
+       lxc-attach -P /var/lib/waydroid/lxc -n waydroid -- /system/bin/true \
+           >/dev/null 2>&1; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+done
+
+if [ "$attempt" -ge 120 ]; then
+    printf '%s\n' 'Timed out waiting for the Waydroid container.' > "$output"
+    chmod 0644 "$output"
+    exit 1
+fi
+
+timeout 100 lxc-attach -P /var/lib/waydroid/lxc -n waydroid -- \
+    /system/bin/logcat -b all -v threadtime > "$output" 2>&1 || true
+chmod 0644 "$output"

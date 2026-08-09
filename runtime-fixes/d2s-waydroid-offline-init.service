@@ -1,0 +1,14 @@
+[Unit]
+Description=Prepare offline Waydroid images on persistent D2S userdata
+After=local-fs.target dbus.service d2s-android-compat.service
+ConditionPathExists=/userdata/waydroid-staging/waydroid-system.zip
+ConditionPathExists=!/userdata/.ubuntu-touch-d2s-waydroid-ready
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/d2s-waydroid-offline-init
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

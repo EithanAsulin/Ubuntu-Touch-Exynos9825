@@ -1,0 +1,126 @@
+diff --git a/arch/arm64/configs/exynos9820-d2s_defconfig b/arch/arm64/configs/exynos9820-d2s_defconfig
+index 1f2bdbd69..f75d8f769 100644
+--- a/arch/arm64/configs/exynos9820-d2s_defconfig
++++ b/arch/arm64/configs/exynos9820-d2s_defconfig
+@@ -1,6 +1,6 @@
+ CONFIG_SYSVIPC=y
+ CONFIG_POSIX_MQUEUE=y
+-# CONFIG_FHANDLE is not set
++CONFIG_FHANDLE=y
+ CONFIG_AUDIT=y
+ CONFIG_NO_HZ=y
+ CONFIG_HIGH_RES_TIMERS=y
+@@ -14,7 +14,7 @@ CONFIG_MEMCG=y
+ CONFIG_MEMCG_SWAP=y
+ CONFIG_CGROUP_SCHED=y
+ CONFIG_CFS_BANDWIDTH=y
+-CONFIG_RT_GROUP_SCHED=y
++# CONFIG_RT_GROUP_SCHED is not set
+ CONFIG_CGROUP_PIDS=y
+ CONFIG_CGROUP_FREEZER=y
+ CONFIG_CPUSETS=y
+@@ -265,6 +265,7 @@ CONFIG_NETPM=y
+ CONFIG_UEVENT_HELPER_PATH="/sbin/hotplug"
+ CONFIG_DEVTMPFS=y
+-CONFIG_EXTRA_FIRMWARE="npu/NPU.bin"
++CONFIG_EXTRA_FIRMWARE="npu/NPU.bin"
++CONFIG_EXTRA_FIRMWARE_DIR="firmware"
+ CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y
+ CONFIG_DMA_CMA=y
+ CONFIG_CMA_SIZE_MBYTES=64
+@@ -324,6 +325,8 @@ CONFIG_DM_ANDROID_VERITY_AT_MOST_ONCE_DEFAULT_ENABLED=y
+ CONFIG_NETDEVICES=y
+ CONFIG_TUN=y
+ CONFIG_VETH=y
++CONFIG_BRIDGE=y
++CONFIG_BRIDGE_NETFILTER=y
+ CONFIG_PPP=y
+ CONFIG_PPP_BSDCOMP=y
+ CONFIG_PPP_DEFLATE=y
+@@ -723,6 +726,7 @@ CONFIG_PREVENT_USB_CONN_OVERHEAT=y
+ CONFIG_PHY_EXYNOS_MIPI=y
+ CONFIG_ANDROID=y
+ CONFIG_ANDROID_BINDER_IPC=y
++CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder,anbox-binder,anbox-hwbinder,anbox-vndbinder"
+ CONFIG_CCIC_NOTIFIER=y
+ CONFIG_CCIC_MAX77705=y
+ CONFIG_CCIC_MAX77705_DEBUG=y
+@@ -797,6 +801,9 @@ CONFIG_EXT2_FS_SECURITY=y
+ CONFIG_EXT3_FS=y
+ CONFIG_EXT3_FS_SECURITY=y
+ CONFIG_EXT4_ENCRYPTION=y
++CONFIG_F2FS_FS=y
++CONFIG_F2FS_FS_SECURITY=y
++CONFIG_F2FS_FS_ENCRYPTION=y
+ CONFIG_FS_CRYPTO_SEC_EXTENSION=y
+ CONFIG_QUOTA=y
+ CONFIG_QUOTA_NETLINK_INTERFACE=y
+@@ -842,6 +849,10 @@ CONFIG_SECURITY_NETWORK=y
+ CONFIG_LSM_MMAP_MIN_ADDR=4096
+ CONFIG_HARDENED_USERCOPY=y
+ CONFIG_SECURITY_SELINUX=y
++CONFIG_SECURITY_APPARMOR=y
++CONFIG_SECURITY_APPARMOR_BOOTPARAM_VALUE=1
++CONFIG_DEFAULT_SECURITY_APPARMOR=y
++CONFIG_DEFAULT_SECURITY="apparmor"
+ CONFIG_INTEGRITY_SIGNATURE=y
+ CONFIG_INTEGRITY_ASYMMETRIC_KEYS=y
+ # CONFIG_CRYPTO_FIPS is not set
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index a5dec81ad..c5369eecc 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -641,7 +641,6 @@ int alloc_rt_sched_group(struct task_group *tg, struct task_group *parent)
+ #ifdef CONFIG_SMP
+ 
+ #include "sched-pelt.h"
+-#define entity_is_task(se)	(!se->my_q)
+ 
+ extern u64 decay_load(u64 val, u64 n);
+ 
+@@ -2097,6 +2096,7 @@ static void remove_rt_entity_load_avg(struct sched_rt_entity *rt_se)
+ 	atomic_long_add(rt_se->avg.util_avg, &rt_rq->removed_util_avg);
+ }
+ 
++#ifdef CONFIG_RT_GROUP_SCHED
+ static void attach_task_rt_rq(struct task_struct *p)
+ {
+ 	struct sched_rt_entity *rt_se = &p->rt;
+@@ -2106,6 +2106,7 @@ static void attach_task_rt_rq(struct task_struct *p)
+ 	update_rt_load_avg(now, rt_se);
+ 	attach_rt_entity_load_avg(rt_rq, rt_se);
+ }
++#endif
+ 
+ static void detach_task_rt_rq(struct task_struct *p)
+ {
+@@ -2401,7 +2402,7 @@ static void put_prev_task_rt(struct rq *rq, struct task_struct *p)
+ void rt_rq_util_change(struct rt_rq *rt_rq)
+ {
+ 	if (&this_rq()->rt == rt_rq)
+-		cpufreq_update_util(rt_rq->rq, SCHED_CPUFREQ_RT);
++		cpufreq_update_util(rq_of_rt_rq(rt_rq), SCHED_CPUFREQ_RT);
+ }
+ 
+ #ifdef CONFIG_RT_GROUP_SCHED
+@@ -2488,7 +2489,10 @@ static inline int propagate_entity_rt_load_avg(struct sched_rt_entity *rt_se)
+ 	return 1;
+ }
+ #else
+-static inline int propagate_entity_rt_load_avg(struct sched_rt_entity *rt_se) { };
++static inline int propagate_entity_rt_load_avg(struct sched_rt_entity *rt_se)
++{
++	return 0;
++}
+ #endif
+ 
+ void update_rt_load_avg(u64 now, struct sched_rt_entity *rt_se)
+@@ -2506,7 +2510,7 @@ void update_rt_load_avg(u64 now, struct sched_rt_entity *rt_se)
+ 	update_rt_rq_load_avg(now, cpu, rt_rq, rt_rq->curr == rt_se);
+ 	propagate_entity_rt_load_avg(rt_se);
+ 
+-	if (entity_is_task(rt_se))
++	if (rt_entity_is_task(rt_se))
+ 		trace_sched_rt_load_avg_task(rt_task_of(rt_se), &rt_se->avg);
+ }
+ 

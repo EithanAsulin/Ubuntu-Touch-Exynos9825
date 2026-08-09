@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+# Android init exposes Samsung audio and media services only after the Halium
+# container and its property socket are ready. Start them explicitly. The
+# UBports QtWebEngine build contains HybrisMediaCodecVideoDecoder, but it
+# cannot enumerate Samsung MFC codecs until minimedia and vendor.media.omx are
+# registered.
+tries=0
+while [ ! -S /dev/socket/property_service ]; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 120 ] || exit 1
+    sleep 1
+done
+
+setprop ctl.start vendor.audio-hal
+setprop ctl.start minimedia
+setprop ctl.start mediaextractor
+setprop ctl.start mediametrics
+setprop ctl.start vendor.media.omx
+setprop ubuntu.h264.supported true
+
+tries=0
+while [ "$(getprop init.svc.vendor.audio-hal)" != running ]; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 60 ] || exit 1
+    sleep 1
+done
+
+for service in minimedia mediaextractor mediametrics vendor.media.omx; do
+    tries=0
+    while [ "$(getprop "init.svc.$service")" != running ]; do
+        tries=$((tries + 1))
+        [ "$tries" -lt 60 ] || exit 1
+        sleep 1
+    done
+done

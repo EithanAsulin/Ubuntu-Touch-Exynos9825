@@ -1,0 +1,23 @@
+[Desktop Entry]
+Version=1.0
+Name=Google Chrome
+GenericName=Web Browser
+Comment=Browse the web and play modern web media
+Exec=/usr/local/bin/d2s-chrome %U
+Terminal=false
+Icon=/opt/google/chrome/product_logo_256.png
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;application/xml;application/pdf;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+StartupWMClass=google-chrome
+X-Ubuntu-Touch=true
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=/usr/local/bin/d2s-chrome
+
+[Desktop Action new-private-window]
+Name=New Incognito Window
+Exec=/usr/local/bin/d2s-chrome --incognito

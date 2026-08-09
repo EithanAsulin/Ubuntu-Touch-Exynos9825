@@ -1,0 +1,8 @@
+ota-required-cache=0
+ota-type=BLOCK
+post-build=ubports/d2s/focal:20.04/d2s-focal/20260804:userdebug/test-keys
+post-build-incremental=20260804
+post-sdk-level=29
+post-security-patch-level=2025-04-01
+post-timestamp=1785873600
+pre-device=d2s

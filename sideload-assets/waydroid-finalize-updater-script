@@ -1,0 +1,35 @@
+assert(getprop("ro.product.device") == "d2s" ||
+       getprop("ro.build.product") == "d2s" ||
+       abort("E3004: This package is only for Samsung d2s."));
+assert(getprop("ro.boot.em.model") == "SM-N975F" ||
+       abort("E3004: This package is only for SM-N975F."));
+
+ui_print("");
+ui_print("D2S USERDATA / Waydroid final verification");
+ui_print("This package does not format or replace any partition.");
+ui_print("It replays ext4 metadata and writes one verified staging marker.");
+ui_print("");
+
+assert(run_program("/system/bin/sh", "-c",
+       "dev=/dev/block/platform/13d60000.ufs/by-name/userdata; cd /; umount /data >/dev/null 2>&1 || true; umount /userdata >/dev/null 2>&1 || true; umount /tmp/d2s-userdata-check >/dev/null 2>&1 || true; test \"$(/system/bin/blockdev --getsize64 \"$dev\")\" = 246016901120 && mkdir -p /tmp/d2s-userdata-check && mount -t ext4 -o rw \"$dev\" /tmp/d2s-userdata-check && test -f /tmp/d2s-userdata-check/.ubuntu-touch-d2s-ext4 && test -s /tmp/d2s-userdata-check/waydroid-staging/waydroid-system.zip && test -s /tmp/d2s-userdata-check/waydroid-staging/waydroid-vendor.zip") == 0 ||
+       abort("E1001: The verified ext4 USERDATA or staged files are missing."));
+
+ui_print("Verifying Waydroid system archive...");
+assert(run_program("/system/bin/sh", "-c",
+       "cd /tmp/d2s-userdata-check/waydroid-staging && printf 'c4b45fad36bee7c0db8a1d9315a5be0035520c53d3d005a807735ae9b7ee79cf  waydroid-system.zip\\n' >/tmp/d2s-waydroid-system.sha256 && /system/bin/toybox sha256sum -c /tmp/d2s-waydroid-system.sha256") == 0 ||
+       abort("E1001: Waydroid system archive hash mismatch."));
+
+ui_print("Verifying Waydroid vendor archive...");
+assert(run_program("/system/bin/sh", "-c",
+       "cd /tmp/d2s-userdata-check/waydroid-staging && printf '5b48a2771e77ff9085862f58b5c9d852d439d5e57dd38ea33b58381c2b14ca48  waydroid-vendor.zip\\n' >/tmp/d2s-waydroid-vendor.sha256 && /system/bin/toybox sha256sum -c /tmp/d2s-waydroid-vendor.sha256") == 0 ||
+       abort("E1001: Waydroid vendor archive hash mismatch."));
+
+ui_print("Detaching USERDATA cleanly...");
+assert(run_program("/system/bin/sh", "-c",
+       "touch /tmp/d2s-userdata-check/.ubuntu-touch-d2s-waydroid-staged && sync && cd / && (umount /tmp/d2s-userdata-check || umount -l /tmp/d2s-userdata-check) && ! grep -q ' /tmp/d2s-userdata-check ' /proc/mounts") == 0 ||
+       abort("E1001: USERDATA detach failed."));
+
+ui_print("");
+ui_print("PASS: USERDATA ext4 and both Waydroid archives verified.");
+ui_print("Return to recovery and reboot directly; do not Format Data.");
+ui_print("");

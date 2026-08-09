@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+[ "$(id -u)" -eq 0 ]
+
+driver_source=${1:-/home/phablet/waydroid-drivers.py}
+driver_target=/usr/lib/waydroid/tools/helpers/drivers.py
+
+[ -f "$driver_source" ]
+for node in anbox-binder anbox-vndbinder anbox-hwbinder; do
+    [ -c "/dev/$node" ]
+done
+
+systemctl stop waydroid-container.service
+
+install -m 0644 "$driver_source" "$driver_target"
+waydroid init -f -i /usr/share/waydroid-extra/images
+
+grep -qx 'binder = anbox-binder' /var/lib/waydroid/waydroid.cfg
+grep -qx 'vndbinder = anbox-vndbinder' /var/lib/waydroid/waydroid.cfg
+grep -qx 'hwbinder = anbox-hwbinder' /var/lib/waydroid/waydroid.cfg
+
+systemctl start waydroid-container.service
+
+printf '%s\n' 'Waydroid now uses dedicated Binder devices.'

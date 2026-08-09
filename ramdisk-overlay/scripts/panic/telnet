@@ -1,0 +1,20 @@
+#!/bin/sh
+
+# The upstream panic hook exposes an unauthenticated root telnet shell over
+# USB.  Keep the hook name so this overlay replaces the copy in the base
+# ramdisk, but deliberately provide no network service or command channel.
+
+PREREQ=""
+prereqs() {
+	echo "$PREREQ"
+}
+
+case ${1:-} in
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+echo "Halium initramfs panic network shell disabled" >/dev/kmsg 2>/dev/null || true
+exit 0

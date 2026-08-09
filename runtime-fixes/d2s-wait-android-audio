@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+tries=0
+while [ "$(getprop init.svc.vendor.audio-hal)" != running ]; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 120 ] || exit 1
+    sleep 1
+done
+

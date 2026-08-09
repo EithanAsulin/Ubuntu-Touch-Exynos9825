@@ -1,0 +1,9 @@
+d1x:
+  Vendor: Samsung
+  PrettyName: Galaxy Note10 5G
+  DeviceType: phone
+  GridUnit: 21
+  SupportedOrientations:
+    - Portrait
+    - Landscape
+    - InvertedLandscape

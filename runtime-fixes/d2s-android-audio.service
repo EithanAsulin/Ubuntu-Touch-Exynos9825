@@ -1,0 +1,12 @@
+[Unit]
+Description=Start Samsung Android audio and media codec services
+Requires=lxc-android-config.service d2s-android-compat.service
+After=lxc-android-config.service d2s-android-compat.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/d2s-android-audio-start
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

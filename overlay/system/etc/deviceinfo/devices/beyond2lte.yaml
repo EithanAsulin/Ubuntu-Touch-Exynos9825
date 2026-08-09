@@ -1,0 +1,9 @@
+beyond2lte:
+  Vendor: Samsung
+  PrettyName: Galaxy S10+
+  DeviceType: phone
+  GridUnit: 27
+  SupportedOrientations:
+    - Portrait
+    - Landscape
+    - InvertedLandscape

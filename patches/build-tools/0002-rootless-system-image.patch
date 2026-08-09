@@ -1,0 +1,127 @@
+diff --git a/system-image-from-ota.sh b/system-image-from-ota.sh
+index 7e3b670..746b497 100755
+--- a/system-image-from-ota.sh
++++ b/system-image-from-ota.sh
+@@ -8,14 +8,18 @@ SRC="$(realpath $(dirname "$1" 2>/dev/null || echo 'src'))"
+ OUT="$(realpath "$2" 2>/dev/null || echo 'out')"
+ 
+ source "${HERE}/deviceinfo"
++SYSTEM_IMAGE_WORKDIR="${SYSTEM_IMAGE_WORKDIR:-/tmp/system-image}"
++case "$SYSTEM_IMAGE_WORKDIR" in
++    ""|/) echo "Unsafe SYSTEM_IMAGE_WORKDIR" >&2; exit 1 ;;
++esac
+ 
+ logit() {
+     echo "System image: $1"
+-    echo "System image: $1" >> /tmp/system-image/system-image-upgrader.log
++    echo "System image: $1" >> "$SYSTEM_IMAGE_WORKDIR/system-image-upgrader.log"
+ }
+ 
+-mkdir -p /tmp/system-image
+-echo "-- System image log --" > /tmp/system-image/system-image-upgrader.log
++mkdir -p "$SYSTEM_IMAGE_WORKDIR"
++echo "-- System image log --" > "$SYSTEM_IMAGE_WORKDIR/system-image-upgrader.log"
+ logit "Starting image Upgrade pre"
+ if [ ! -e "$1" ]; then
+     logit "Command file doesn't exist: $1"
+@@ -29,7 +33,7 @@ REMOVE_LIST="$COMMAND_FILE"
+ # Used as a security check to see if we would change the password
+ DATA_FORMAT=0
+ 
+-TMP=$(mktemp -d -p /tmp/system-image)
++TMP=$(mktemp -d -p "$SYSTEM_IMAGE_WORKDIR")
+ mkdir -p "$OUT"
+ 
+ # System Mountpoint
+@@ -70,7 +74,7 @@ install_keyring() {
+     fi
+ 
+     # Unpacking
+-    TMPDIR=$(mktemp -d -p /tmp/system-image/ tmp.XXXXXXXXXX)
++    TMPDIR=$(mktemp -d -p "$SYSTEM_IMAGE_WORKDIR" tmp.XXXXXXXXXX)
+     cd $TMPDIR
+     xzcat $1 | tar --numeric-owner -xf -
+     if [ ! -e keyring.json ] || [ ! -e keyring.gpg ]; then
+@@ -95,7 +99,7 @@ install_keyring() {
+         return 1
+     fi
+ 
+-    if [ -e /tmp/system-image/$keyring_type ]; then
++    if [ -e "$SYSTEM_IMAGE_WORKDIR/$keyring_type" ]; then
+         rm -Rf $TMPDIR
+         logit "Keyring already loaded: $1"
+         return 1
+@@ -126,11 +130,11 @@ install_keyring() {
+         return 1
+     fi
+ 
+-    mkdir /tmp/system-image/$keyring_type
+-    # chmod 700 /tmp/system-image/$keyring_type
+-    mv $TMPDIR/keyring.gpg /tmp/system-image/$keyring_type/pubring.gpg
+-    # chmod 600 /tmp/system-image/$keyring_type/pubring.gpg
+-    # chown 0:0 /tmp/system-image/$keyring_type/pubring.gpg
++    mkdir "$SYSTEM_IMAGE_WORKDIR/$keyring_type"
++    # chmod 700 "$SYSTEM_IMAGE_WORKDIR/$keyring_type"
++    mv "$TMPDIR/keyring.gpg" "$SYSTEM_IMAGE_WORKDIR/$keyring_type/pubring.gpg"
++    # chmod 600 "$SYSTEM_IMAGE_WORKDIR/$keyring_type/pubring.gpg"
++    # chown 0:0 "$SYSTEM_IMAGE_WORKDIR/$keyring_type/pubring.gpg"
+     rm -Rf $TMPDIR
+     return 0
+ }
+@@ -160,8 +164,8 @@ factory_wipe() {
+ }
+ 
+ # Initialize GPG
+-rm -Rf /tmp/system-image
+-mkdir -p /tmp/system-image
++rm -Rf "$SYSTEM_IMAGE_WORKDIR"
++mkdir -p "$SYSTEM_IMAGE_WORKDIR"
+ if [ -e /etc/system-image/archive-master.tar.xz ]; then
+     logit "Loading keyring: archive-master.tar.xz"
+     install_keyring /etc/system-image/archive-master.tar.xz /etc/system-image/archive-master.tar.xz.asc
+@@ -212,7 +216,11 @@ do
+             case "$2" in
+                 system)
+                     mkdir -p "$SYSTEM_MOUNTPOINT"
+-                    LOOPDEV=$(sudo losetup -f) || true
++                    if [ "${SYSTEM_IMAGE_ROOTLESS:-0}" = "1" ]; then
++                        LOOPDEV=""
++                    else
++                        LOOPDEV=$(sudo losetup -f) || true
++                    fi
+ 
+                     if [ ! -z "$LOOPDEV" ] && [ ! -e "$LOOPDEV" ]; then
+                         sudo mknod "$LOOPDEV" b 7 $(echo "$LOOPDEV" | grep -Eo '[0-9]+$')
+@@ -279,17 +287,29 @@ do
+             fi
+ 
+             # Unpack everything else on top of the system partition
+-            sudo sh -c "xzcat \"$SRC/$2\" | tar --numeric-owner -xf -"
++            if [ "${SYSTEM_IMAGE_ROOTLESS:-0}" = "1" ]; then
++                xzcat "$SRC/$2" | tar --numeric-owner -xf -
++            else
++                sudo sh -c "xzcat \"$SRC/$2\" | tar --numeric-owner -xf -"
++            fi
+             rm -f removed
+ 
+             # Rename system.img to android-rootfs.img until UBPorts CI builds are fixed
+             if [ -e "system/var/lib/lxc/android/system.img" ]; then
+-                sudo mv system/var/lib/lxc/android/system.img system/var/lib/lxc/android/android-rootfs.img
++                if [ "${SYSTEM_IMAGE_ROOTLESS:-0}" = "1" ]; then
++                    mv system/var/lib/lxc/android/system.img system/var/lib/lxc/android/android-rootfs.img
++                else
++                    sudo mv system/var/lib/lxc/android/system.img system/var/lib/lxc/android/android-rootfs.img
++                fi
+             fi
+ 
+             # Move things to data
+             cp partitions/* "$OUT" || true
+-            sudo rm -Rf partitions || true
++            if [ "${SYSTEM_IMAGE_ROOTLESS:-0}" = "1" ]; then
++                rm -Rf partitions || true
++            else
++                sudo rm -Rf partitions || true
++            fi
+ 
+             # Remove tarball to free up space, since device tarballs
+             # extract partitions/blobs that might fill up cache,

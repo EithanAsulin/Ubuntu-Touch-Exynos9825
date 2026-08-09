@@ -1,0 +1,19 @@
+assert(getprop("ro.product.device") == "d2s" ||
+       getprop("ro.build.product") == "d2s" ||
+       abort("E3004: Expected Samsung d2s recovery."));
+assert(getprop("ro.boot.em.model") == "SM-N975F" ||
+       abort("E3004: Expected SM-N975F."));
+assert(run_program("/system/bin/sh", "-c",
+       "test -b /dev/block/platform/13d60000.ufs/by-name/boot && test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/boot)\" = 57671680") == 0 ||
+       abort("BOOT partition preflight failed."));
+
+ui_print("");
+ui_print("D2S Ubuntu Touch RC3 kernel rollback");
+ui_print("Writing BOOT only; SYSTEM and userdata are preserved.");
+show_progress(0.950000, 0);
+assert(package_extract_file("boot.img",
+       "/dev/block/platform/13d60000.ufs/by-name/boot") ||
+       abort("E1001: Failed to write BOOT."));
+set_progress(1.000000);
+ui_print("RC3 kernel restored.");
+ui_print("");

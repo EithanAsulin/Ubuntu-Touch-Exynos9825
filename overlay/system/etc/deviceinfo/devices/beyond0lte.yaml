@@ -1,0 +1,9 @@
+beyond0lte:
+  Vendor: Samsung
+  PrettyName: Galaxy S10e
+  DeviceType: phone
+  GridUnit: 23
+  SupportedOrientations:
+    - Portrait
+    - Landscape
+    - InvertedLandscape

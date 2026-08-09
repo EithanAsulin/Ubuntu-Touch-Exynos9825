@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+source=/android/system/lib64/hw/audio.hidl_compat.default.so
+target=/android/vendor/lib64/hw/audio.primary.default.so
+
+test -f "$source"
+test -f "$target"
+
+# Samsung ships only a 32-bit primary audio HAL. The Halium 11 GSI provides
+# this 64-bit HIDL wrapper for PulseAudio's droid module. Install the bind
+# before Android init parses the vendor audio service.
+if ! mountpoint -q "$target"; then
+    mount --bind "$source" "$target"
+fi
+
+test "$(stat -c '%d:%i' "$source")" = "$(stat -c '%d:%i' "$target")"

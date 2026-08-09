@@ -1,0 +1,11 @@
+# QtWebEngine's GPU process caches compiled Mali shaders here. Denying this is
+# safe but forces recompilation on every launch and makes video/UI stalls much
+# worse on D2S.
+owner @{HOME}/.cache/qtshadercache-*/ rw,
+owner @{HOME}/.cache/qtshadercache-*/** rwk,
+
+# QtWebEngine's audio utility enumerates PulseAudio drop-ins and ICU timezone
+# resources before opening the verified PulseAudio sink.
+/etc/pulse/client.conf.d/ r,
+/etc/pulse/client.conf.d/** r,
+/usr/share/zoneinfo-icu/** r,

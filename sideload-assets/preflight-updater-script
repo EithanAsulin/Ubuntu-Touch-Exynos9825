@@ -1,0 +1,40 @@
+assert(getprop("ro.product.device") == "d2s" ||
+       getprop("ro.build.product") == "d2s" ||
+       abort("E3004: Expected d2s; detected " +
+             getprop("ro.product.device") + "."));
+assert(getprop("ro.boot.em.model") == "SM-N975F" ||
+       abort("E3004: Expected SM-N975F; detected " +
+             getprop("ro.boot.em.model") + "."));
+assert(getprop("ro.boot.super_partition") == "system" ||
+       abort("E3004: Physical super container is not SYSTEM."));
+
+ui_print("");
+ui_print("D2S Ubuntu Touch recovery preflight");
+ui_print("This package does not write any partition.");
+
+assert(run_program("/system/bin/sh", "-c",
+       "test -b /dev/block/platform/13d60000.ufs/by-name/system") == 0 ||
+       abort("Physical SYSTEM block device is missing."));
+assert(run_program("/system/bin/sh", "-c",
+       "test -b /dev/block/platform/13d60000.ufs/by-name/boot") == 0 ||
+       abort("BOOT block device is missing."));
+assert(run_program("/system/bin/sh", "-c",
+       "test -b /dev/block/platform/13d60000.ufs/by-name/vendor") == 0 ||
+       abort("VENDOR block device is missing."));
+assert(run_program("/system/bin/sh", "-c",
+       "test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/system)\" = 6502219776") == 0 ||
+       abort("Physical SYSTEM capacity does not match the downloaded PIT."));
+assert(run_program("/system/bin/sh", "-c",
+       "test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/boot)\" = 57671680") == 0 ||
+       abort("BOOT capacity does not match the downloaded PIT."));
+assert(run_program("/system/bin/sh", "-c",
+       "test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/vendor)\" = 1331691520") == 0 ||
+       abort("VENDOR capacity does not match the downloaded PIT."));
+
+ui_print("PASS: d2s / SM-N975F assertions");
+ui_print("PASS: physical SYSTEM is 6502219776 bytes");
+ui_print("PASS: VENDOR is 1331691520 bytes");
+ui_print("PASS: BOOT is 57671680 bytes");
+ui_print("PASS: Evolution X updater execution");
+ui_print("Preflight complete; nothing was written.");
+ui_print("");

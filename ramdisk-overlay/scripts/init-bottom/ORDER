@@ -1,0 +1,3 @@
+/scripts/init-bottom/udev "$@"
+[ -e /conf/param.conf ] && . /conf/param.conf
+/scripts/init-bottom/d2s-static-rndis "$@"

@@ -1,0 +1,13 @@
+assert(getprop("ro.product.device") == "d2s" ||
+       getprop("ro.build.product") == "d2s" ||
+       abort("E3004: Expected Samsung d2s recovery."));
+
+ui_print("");
+ui_print("Exporting the recovery updater log to RAM; no partition is modified.");
+
+assert(run_program("/system/bin/sh", "-c",
+       "cp /tmp/recovery.log /tmp/runtime-repair-recovery.log; getprop > /tmp/runtime-repair-getprop.txt; cat /proc/mounts > /tmp/runtime-repair-mounts.txt; chown 2000:2000 /tmp/runtime-repair-recovery.log /tmp/runtime-repair-getprop.txt /tmp/runtime-repair-mounts.txt; chmod 0644 /tmp/runtime-repair-recovery.log /tmp/runtime-repair-getprop.txt /tmp/runtime-repair-mounts.txt; chcon u:object_r:shell_data_file:s0 /tmp/runtime-repair-recovery.log /tmp/runtime-repair-getprop.txt /tmp/runtime-repair-mounts.txt") == 0 ||
+       abort("Failed to export recovery log to RAM."));
+
+ui_print("PASS: /tmp/runtime-repair-recovery.log");
+ui_print("");

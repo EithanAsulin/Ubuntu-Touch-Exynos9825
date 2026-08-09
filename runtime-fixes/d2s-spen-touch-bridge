@@ -1,0 +1,142 @@
+#!/usr/bin/python3
+"""Translate the Note10+ Wacom pen into a conventional MT touchscreen."""
+
+import fcntl
+import os
+import select
+import struct
+import sys
+import time
+
+
+EV_SYN = 0x00
+EV_KEY = 0x01
+EV_ABS = 0x03
+SYN_REPORT = 0
+BTN_TOUCH = 0x14A
+ABS_X = 0x00
+ABS_Y = 0x01
+ABS_PRESSURE = 0x18
+ABS_MT_SLOT = 0x2F
+ABS_MT_POSITION_X = 0x35
+ABS_MT_POSITION_Y = 0x36
+ABS_MT_TRACKING_ID = 0x39
+ABS_MT_PRESSURE = 0x3A
+INPUT_PROP_DIRECT = 0x01
+
+UI_SET_EVBIT = 0x40045564
+UI_SET_KEYBIT = 0x40045565
+UI_SET_ABSBIT = 0x40045567
+UI_SET_PROPBIT = 0x4004556E
+UI_DEV_CREATE = 0x5501
+UI_DEV_DESTROY = 0x5502
+
+EVENT = struct.Struct("llHHi")
+ABS_CNT = 64
+RAW_X_MAX = 7344
+RAW_Y_MAX = 15504
+RAW_PRESSURE_MAX = 4095
+
+
+def configure_uinput(fd):
+    for event_type in (EV_KEY, EV_ABS):
+        fcntl.ioctl(fd, UI_SET_EVBIT, event_type)
+    fcntl.ioctl(fd, UI_SET_KEYBIT, BTN_TOUCH)
+    for axis in (
+        ABS_X,
+        ABS_Y,
+        ABS_PRESSURE,
+        ABS_MT_SLOT,
+        ABS_MT_POSITION_X,
+        ABS_MT_POSITION_Y,
+        ABS_MT_TRACKING_ID,
+        ABS_MT_PRESSURE,
+    ):
+        fcntl.ioctl(fd, UI_SET_ABSBIT, axis)
+    fcntl.ioctl(fd, UI_SET_PROPBIT, INPUT_PROP_DIRECT)
+
+    absmax = [0] * ABS_CNT
+    absmin = [0] * ABS_CNT
+    absfuzz = [0] * ABS_CNT
+    absflat = [0] * ABS_CNT
+    absmax[ABS_X] = absmax[ABS_MT_POSITION_X] = RAW_X_MAX
+    absmax[ABS_Y] = absmax[ABS_MT_POSITION_Y] = RAW_Y_MAX
+    absmax[ABS_PRESSURE] = absmax[ABS_MT_PRESSURE] = RAW_PRESSURE_MAX
+    absmax[ABS_MT_TRACKING_ID] = 65535
+    descriptor = struct.pack(
+        "80sHHHHI" + "i" * ABS_CNT * 4,
+        b"D2S S Pen Touch Bridge",
+        0x06,
+        0x04E8,
+        0xD2A0,
+        1,
+        0,
+        *(absmax + absmin + absfuzz + absflat),
+    )
+    os.write(fd, descriptor)
+    fcntl.ioctl(fd, UI_DEV_CREATE)
+
+
+def emit(fd, event_type, code, value):
+    os.write(fd, EVENT.pack(0, 0, event_type, code, value))
+
+
+def main():
+    source_path = sys.argv[1] if len(sys.argv) > 1 else "/dev/input/event4"
+    source = os.open(source_path, os.O_RDONLY | os.O_NONBLOCK)
+    target = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+    configure_uinput(target)
+    time.sleep(0.5)
+
+    x = y = pressure = 0
+    down = emitted_down = False
+    tracking_id = 0
+    try:
+        while True:
+            readable, _, _ = select.select([source], [], [], 5)
+            if not readable:
+                continue
+            data = os.read(source, EVENT.size * 256)
+            for offset in range(0, len(data) - EVENT.size + 1, EVENT.size):
+                _, _, event_type, code, value = EVENT.unpack_from(data, offset)
+                if event_type == EV_ABS:
+                    if code == ABS_X:
+                        x = max(0, min(RAW_X_MAX, value))
+                    elif code == ABS_Y:
+                        y = max(0, min(RAW_Y_MAX, value))
+                    elif code == ABS_PRESSURE:
+                        pressure = max(0, min(RAW_PRESSURE_MAX, value))
+                elif event_type == EV_KEY and code == BTN_TOUCH:
+                    down = bool(value)
+                elif event_type != EV_SYN or code != SYN_REPORT:
+                    continue
+
+                if down and not emitted_down:
+                    tracking_id = (tracking_id + 1) & 0xFFFF
+                    emit(target, EV_ABS, ABS_MT_SLOT, 0)
+                    emit(target, EV_ABS, ABS_MT_TRACKING_ID, tracking_id)
+                    emit(target, EV_KEY, BTN_TOUCH, 1)
+                    emitted_down = True
+                if down:
+                    emit(target, EV_ABS, ABS_X, x)
+                    emit(target, EV_ABS, ABS_Y, y)
+                    emit(target, EV_ABS, ABS_PRESSURE, pressure)
+                    emit(target, EV_ABS, ABS_MT_POSITION_X, x)
+                    emit(target, EV_ABS, ABS_MT_POSITION_Y, y)
+                    emit(target, EV_ABS, ABS_MT_PRESSURE, pressure)
+                    emit(target, EV_SYN, SYN_REPORT, 0)
+                elif emitted_down:
+                    emit(target, EV_ABS, ABS_PRESSURE, 0)
+                    emit(target, EV_ABS, ABS_MT_PRESSURE, 0)
+                    emit(target, EV_ABS, ABS_MT_TRACKING_ID, -1)
+                    emit(target, EV_KEY, BTN_TOUCH, 0)
+                    emit(target, EV_SYN, SYN_REPORT, 0)
+                    emitted_down = False
+    finally:
+        fcntl.ioctl(target, UI_DEV_DESTROY)
+        os.close(target)
+        os.close(source)
+
+
+if __name__ == "__main__":
+    main()

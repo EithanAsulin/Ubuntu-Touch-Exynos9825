@@ -1,0 +1,14 @@
+assert(getprop("ro.product.device") == "d2s" ||
+       getprop("ro.build.product") == "d2s" ||
+       abort("E3004: Expected Samsung d2s recovery."));
+
+ui_print("");
+ui_print("RC1 read-only USERDATA and Waydroid postflight");
+ui_print("No partition is written or formatted.");
+
+assert(run_program("/system/bin/sh", "-c",
+       "out=/tmp/d2s-rc1-postflight.txt; dev=/dev/block/platform/13d60000.ufs/by-name/userdata; mnt=/tmp/d2s-rc1-postflight-mnt; rm -f \"$out\"; mkdir -p \"$mnt\"; umount \"$mnt\" >/dev/null 2>&1 || true; { echo 'D2S RC1 POSTFLIGHT'; echo -n 'userdata_bytes='; /system/bin/blockdev --getsize64 \"$dev\"; /system/bin/e2fsck -fn \"$dev\"; } >\"$out\" 2>&1; if mount -t ext4 -o ro \"$dev\" \"$mnt\"; then echo 'mount_ro=PASS' >>\"$out\"; test -f \"$mnt/.ubuntu-touch-d2s-ext4\" && echo 'ext4_marker=PASS' >>\"$out\" || echo 'ext4_marker=FAIL' >>\"$out\"; for f in waydroid-system.zip waydroid-vendor.zip; do p=\"$mnt/waydroid-staging/$f\"; if test -f \"$p\"; then stat -c \"$f bytes=%s\" \"$p\" >>\"$out\"; sha256sum \"$p\" >>\"$out\"; else echo \"$f=MISSING\" >>\"$out\"; fi; done; umount \"$mnt\" && echo 'unmount_ro=PASS' >>\"$out\" || echo 'unmount_ro=FAIL' >>\"$out\"; else echo 'mount_ro=FAIL' >>\"$out\"; fi; chown 2000:2000 \"$out\"; chmod 0644 \"$out\"; chcon u:object_r:shell_data_file:s0 \"$out\"") == 0 ||
+       abort("Failed to export RC1 postflight result."));
+
+ui_print("PASS: /tmp/d2s-rc1-postflight.txt");
+ui_print("");

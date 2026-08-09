@@ -1,0 +1,9 @@
+d2s:
+  Vendor: Samsung
+  PrettyName: Galaxy Note10+
+  DeviceType: phone
+  GridUnit: 26
+  SupportedOrientations:
+    - Portrait
+    - Landscape
+    - InvertedLandscape

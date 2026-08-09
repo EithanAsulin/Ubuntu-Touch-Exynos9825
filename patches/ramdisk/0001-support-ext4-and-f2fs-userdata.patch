@@ -1,0 +1,98 @@
+--- halium
++++ halium
+@@ -251,21 +251,18 @@
+ 
+ 	path=$1
+ 
+-	# Partition size in 1k blocks
+-	case $path in
+-	/dev/mmcblk*)
+-		pblocks=$(grep ${path#/dev/*} /proc/partitions | awk {'print $3'})
+-		;;
+-	/dev/disk*)
+-		pblocks=$(grep $(basename $(readlink $path)) /proc/partitions | awk {'print $3'})
+-		;;
+-	esac
++	# Partition size in 1k blocks. Resolve by-name links first so UFS
++	# devices such as /dev/sda32 work as well as eMMC devices.
++	block=$(basename "$(readlink -f "$path")")
++	pblocks=$(awk -v block="$block" '$4 == block { print $3 }' /proc/partitions)
++	[ -n "$pblocks" ] || return 0
+ 	# Filesystem size in 4k blocks
+-	fsblocks=$(dumpe2fs -h $path | grep "Block count" | awk {'print $3'})
++	fsblocks=$(dumpe2fs -h "$path" 2>/dev/null | awk '/Block count/ { print $3 }')
++	[ -n "$fsblocks" ] || return 0
+ 	# Difference between the reported sizes in 1k blocks
+ 	dblocks=$((pblocks - 4 * fsblocks))
+ 	if [ $dblocks -gt 10000 ]; then
+-		resize2fs -f $path
++		resize2fs -f "$path"
+ 		tell_kmsg "resized userdata filesystem to fill $path"
+ 	fi
+ }
+@@ -466,25 +463,47 @@
+ 		halium_panic "Couldn't find data partition."
+ 	fi
+ 
+-	tell_kmsg "checking filesystem integrity for the userdata partition"
+-	# Mounting and umounting first, let the kernel handle the journal and
+-	# orphaned inodes (faster than e2fsck). Then, just run e2fsck forcing -y.
+-	# Also check the amount of time used by to check the filesystem.
+-	fsck_start=$(date +%s)
+-	mount -o errors=remount-ro $path /tmpmnt
+-	umount /tmpmnt
+-	e2fsck -y $path >/run/e2fsck.out 2>&1
+-	fsck_end=$(date +%s)
+-	tell_kmsg "checking filesystem for userdata took (including e2fsck) $((fsck_end - fsck_start)) seconds"
+-
+-	resize_userdata_if_needed ${path}
+-
+-	tell_kmsg "mounting $path"
+-
+-	# Mount the data partition to a temporary mount point
+-	# FIXME: data=journal used on ext4 as a workaround for bug 1387214
+-	[ `blkid $path -o value -s TYPE` = "ext4" ] && OPTIONS="data=journal,"
+-	mount -o discard,$OPTIONS $path /tmpmnt
++	userdata_fstype=$(blkid "$path" -o value -s TYPE)
++	if [ -z "$userdata_fstype" ]; then
++		# Samsung's Exynos UFS ioctl is incompatible with this initramfs blkid,
++		# which leaves TYPE empty even for recovery-formatted F2FS userdata.
++		tell_kmsg "blkid could not identify d2s userdata; assuming F2FS"
++		userdata_fstype="f2fs"
++	fi
++	case "$userdata_fstype" in
++	ext4)
++		tell_kmsg "checking ext4 userdata filesystem integrity"
++		# Mounting and unmounting first lets the kernel handle the journal and
++		# orphaned inodes before the forced offline check.
++		fsck_start=$(date +%s)
++		mount -o errors=remount-ro "$path" /tmpmnt
++		umount /tmpmnt
++		e2fsck -y "$path" >/run/e2fsck.out 2>&1
++		fsck_end=$(date +%s)
++		tell_kmsg "checking ext4 userdata took $((fsck_end - fsck_start)) seconds"
++		resize_userdata_if_needed "$path"
++		mount_options="discard,data=journal"
++		;;
++	f2fs)
++		# Evolution X recovery formats d2s userdata as F2FS. Do not run ext4
++		# repair or resize tools on it; the kernel performs checkpoint recovery.
++		tell_kmsg "using F2FS userdata without ext4 repair/resize"
++		mount_options="discard"
++		;;
++	*)
++		halium_panic "Unsupported userdata filesystem: $userdata_fstype"
++		;;
++	esac
++
++	tell_kmsg "mounting $path as $userdata_fstype"
++	if ! mount -t "$userdata_fstype" -o "$mount_options" "$path" /tmpmnt; then
++		# Newer Android recoveries may create an F2FS filesystem with features
++		# unavailable in Samsung's 4.14 kernel. Keep the port bootable for SSH
++		# and display/UI validation by providing non-persistent userdata in RAM.
++		tell_kmsg "userdata mount failed; using ephemeral tmpfs userdata"
++		mount -t tmpfs -o mode=0755 tmpfs /tmpmnt || halium_panic "Could not create fallback userdata"
++		touch /tmpmnt/.d2s-ephemeral-userdata
++	fi
+ 
+ 	# Set $_syspart if it is specified as systempart= on the command line

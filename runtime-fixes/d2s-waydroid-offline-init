@@ -1,0 +1,64 @@
+#!/bin/sh
+set -eu
+
+stage=/userdata/waydroid-staging
+images=/userdata/waydroid-images
+system_zip="$stage/waydroid-system.zip"
+vendor_zip="$stage/waydroid-vendor.zip"
+# Android 11 (lineage-18.1) system image, the tested pairing for the
+# HALIUM_11 vendor. The previous Android 13 (lineage-20.0) system crashed
+# against the Android 11 vendor (IStats AIDL + vibrator/sensors binder
+# context mismatches).
+system_sha=2700a68255c234f04453da15bfdaed0b0d30343f3af968cf39a096657d88a625
+vendor_sha=5b48a2771e77ff9085862f58b5c9d852d439d5e57dd38ea33b58381c2b14ca48
+system_image_sha=afab4378b6815596f69fd28e1b2261fae0020eb1e440af71a7479f3acb3206c2
+vendor_image_sha=11591fbcd87fe5ed71d3bce5b2a2c0b60121a7936edef7834a305c817f7f4a1c
+
+[ "$(findmnt -n -o FSTYPE /userdata)" = ext4 ]
+[ -f /userdata/.ubuntu-touch-d2s-ext4 ]
+
+mkdir -p "$images"
+
+# Preserve already verified images across retries. The old implementation
+# expanded roughly 2 GiB again every ten seconds whenever `waydroid init`
+# failed, which starved Lomiri and made the UI appear frozen.
+if [ ! -f "$images/system.img" ] || \
+   [ "$(sha256sum "$images/system.img" | awk '{print $1}')" != "$system_image_sha" ]; then
+    [ "$(sha256sum "$system_zip" | awk '{print $1}')" = "$system_sha" ]
+    rm -f "$images/system.img.new"
+    unzip -p "$system_zip" system.img > "$images/system.img.new"
+    [ "$(sha256sum "$images/system.img.new" | awk '{print $1}')" = "$system_image_sha" ]
+    mv -f "$images/system.img.new" "$images/system.img"
+    sync
+fi
+
+if [ ! -f "$images/vendor.img" ] || \
+   [ "$(sha256sum "$images/vendor.img" | awk '{print $1}')" != "$vendor_image_sha" ]; then
+    [ "$(sha256sum "$vendor_zip" | awk '{print $1}')" = "$vendor_sha" ]
+    rm -f "$images/vendor.img.new"
+    unzip -p "$vendor_zip" vendor.img > "$images/vendor.img.new"
+    [ "$(sha256sum "$images/vendor.img.new" | awk '{print $1}')" = "$vendor_image_sha" ]
+    mv -f "$images/vendor.img.new" "$images/vendor.img"
+    sync
+fi
+
+# The fixed preinstalled path is a symlink to the persistent userdata files.
+# Force initialization so a partial prior attempt cannot be mistaken for a
+# complete Waydroid installation. This prepares the container but does not
+# start an Android session automatically.
+waydroid init -f -i /usr/share/waydroid-extra/images
+
+# After init, repoint host_hwbinder at the container's own anbox-hwbinder so
+# the vibrator HAL registers on the same binder domain system_server serves.
+# init regenerates the master config_nodes, so apply this after init and
+# refresh the lxc copy the same way a container start would.
+master=/var/lib/waydroid/config_nodes
+if [ -f "$master" ]; then
+    sed -i 's#lxc.mount.entry = /dev/hwbinder dev/host_hwbinder none bind,create=file,optional 0 0#lxc.mount.entry = /dev/anbox-hwbinder dev/host_hwbinder none bind,create=file,optional 0 0#' "$master"
+    mkdir -p /var/lib/waydroid/lxc/waydroid
+    cp -a "$master" /var/lib/waydroid/lxc/waydroid/config_nodes
+fi
+
+rm -f "$system_zip" "$vendor_zip"
+touch /userdata/.ubuntu-touch-d2s-waydroid-ready
+sync

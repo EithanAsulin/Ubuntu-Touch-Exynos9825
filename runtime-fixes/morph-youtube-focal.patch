@@ -1,0 +1,90 @@
+--- a/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/MorphWebContext.qml
++++ b/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/MorphWebContext.qml
+@@ -28,6 +28,7 @@
+     property alias incognito: oxideContext.offTheRecord
+     property int userAgentId: 0
+     property string customUserAgent: ""
++    property var userAgentOverrides: []
+     readonly property string defaultUserAgent: __ua.defaultUA
+     // remember certificate errors for each domain (for click on symbol in address bar)
+     readonly property var certificateErrorsMap: ({})
+@@ -41,6 +42,24 @@
+ 
+     userAgent: (customUserAgent !== "") ? customUserAgent : defaultUserAgent
+ 
++    function applyUserAgentForUrl(targetUrl) {
++        var selected = (customUserAgent !== "") ? customUserAgent : defaultUserAgent
++        for (var i = 0; i < userAgentOverrides.length; ++i) {
++            try {
++                if (new RegExp(userAgentOverrides[i][0]).test(targetUrl)) {
++                    selected = userAgentOverrides[i][1]
++                    break
++                }
++            } catch (e) {
++                console.error("Invalid UA override", userAgentOverrides[i][0])
++            }
++        }
++        if (userAgent !== selected) {
++            userAgent = selected
++            console.log("Applied site UA for", targetUrl)
++        }
++    }
++
+     persistentCookiesPolicy: WebEngineProfile.ForcePersistentCookies
+ 
+     userScripts: [
+--- a/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/MorphWebView.qml
++++ b/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/MorphWebView.qml
+@@ -114,6 +114,18 @@
+     */
+ 
+     onNavigationRequested: {
++        var targetUrl = request.url.toString()
++        if (context.applyUserAgentForUrl) {
++            context.applyUserAgentForUrl(targetUrl)
++        }
++        if (targetUrl.indexOf("intent://") === 0) {
++            var intentEnd = targetUrl.indexOf("#Intent;")
++            var httpsTarget = "https://" + targetUrl.substring(9,
++                intentEnd === -1 ? targetUrl.length : intentEnd)
++            request.action = WebEngineNavigationRequest.IgnoreRequest
++            _webview.url = httpsTarget
++            return
++        }
+         request.action = WebEngineNavigationRequest.AcceptRequest;
+         navigationRequestedDelegate(request);
+     }
+--- a/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/ua-overrides-mobile.js
++++ b/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/ua-overrides-mobile.js
+@@ -24,10 +24,11 @@
+ var nexus5_override = "Mozilla/5.0 (Linux; Ubuntu 20.04; Android 5.0; Nexus 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROMIUM_VERSION} Mobile Safari/537.36";
+ var ubuntu_like_android_override = "Mozilla/5.0 (Linux; Ubuntu 20.04 like Android 5.0;) AppleWebKit/537.36 Chrome/${CHROMIUM_VERSION} Mobile Safari/537.36";
+ var no_android_token = "Mozilla/5.0 (Linux; Ubuntu 20.04;) AppleWebKit/537.36 Chrome/${CHROMIUM_VERSION} Mobile Safari/537.36";
++var youtube_override = "Mozilla/5.0 (Linux; Android 10; SM-N975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+ 
+ var overrides = [
+     // Youtube (https://launchpad.net/bugs/1228415, https://launchpad.net/bugs/1415107, https://launchpad.net/bugs/1417258, https://launchpad.net/bugs/1499394, https://launchpad.net/bugs/1408760, https://launchpad.net/bugs/1437485)
+-    ["^https:\/\/(www|m)\.youtube\.com\/", android_no_device_override],
++    ["^https:\/\/(www|m)\.youtube\.com\/", youtube_override],
+ 
+     // Gmail (https://launchpad.net/bugs/1375889)
+     ["^https:\/\/mail\.google\.com\/", android_no_device_override],
+--- a/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/ua-overrides-desktop.js
++++ b/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/ua-overrides-desktop.js
+@@ -21,6 +21,7 @@
+ // Note: when changing the value of this variable, all domains which
+ // use it must be carefully tested to ensure no regression.
+ var chrome_desktop_override = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/${CHROMIUM_VERSION} Chrome/${CHROMIUM_VERSION} Safari/537.36";
++var youtube_desktop_override = "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+ 
+ var overrides = [
+     // Google calendar
+@@ -28,7 +29,7 @@
+     ["^https:\/\/.+\.google\.com\/calendar\/", chrome_desktop_override],
+ 
+     // Youtube (https://launchpad.net/bugs/1412880)
+-    ["^https:\/\/(www\.)?youtube\.com\/", chrome_desktop_override],
++    ["^https:\/\/(www\.)?youtube\.com\/", youtube_desktop_override],
+ 
+     // Google maps (https://launchpad.net/bugs/1503506, https://launchpad.net/bugs/1551649)
+     ["^https:\/\/(www\.)?google\..+\/maps", chrome_desktop_override],

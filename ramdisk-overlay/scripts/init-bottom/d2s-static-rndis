@@ -1,0 +1,60 @@
+#!/bin/sh
+
+PREREQ="udev"
+
+prereqs()
+{
+    echo "$PREREQ"
+}
+
+case "${1:-}" in
+prereqs)
+    prereqs
+    exit 0
+    ;;
+esac
+
+# Samsung's Exynos configfs implementation is not safe to unlink and relink at
+# runtime.  Build the same one-function gadget layout that Evolution recovery
+# successfully uses, then leave ownership of it in the initramfs.
+CONFIGFS=/sys/kernel/config
+GADGET="$CONFIGFS/usb_gadget/g1"
+CONFIG="$GADGET/configs/b.1"
+
+if ! mountpoint -q "$CONFIGFS" 2>/dev/null; then
+    mkdir -p "$CONFIGFS"
+    mount -t configfs none "$CONFIGFS" || exit 0
+fi
+
+mkdir -p "$GADGET/strings/0x409" "$CONFIG/strings/0x409"
+
+echo 0x04e8 > "$GADGET/idVendor"
+echo 0x6863 > "$GADGET/idProduct"
+echo 0x0200 > "$GADGET/bcdUSB"
+echo 0x0100 > "$GADGET/bcdDevice"
+
+serial=0000000000000000
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+    androidboot.serialno=*) serial=${arg#androidboot.serialno=} ;;
+    esac
+done
+echo "$serial" > "$GADGET/strings/0x409/serialnumber"
+echo Samsung > "$GADGET/strings/0x409/manufacturer"
+echo "Ubuntu Touch on D2S" > "$GADGET/strings/0x409/product"
+
+# This must not be the kernel default "Conf 1".  Samsung's configfs.c treats
+# links under that default as mode-switch metadata and leaves the real USB
+# configuration empty, making the UDC bind fail with -EINVAL.
+echo "Ubuntu Touch RNDIS" > "$CONFIG/strings/0x409/configuration"
+echo 0x384 > "$CONFIG/MaxPower"
+
+mkdir -p "$GADGET/functions/rndis.usb0"
+if [ ! -e "$CONFIG/f1" ]; then
+    ln -s "$GADGET/functions/rndis.usb0" "$CONFIG/f1" || exit 0
+fi
+
+echo 10c00000.dwc3 > "$GADGET/UDC" || exit 0
+echo "d2s-static-rndis: gadget bound to 10c00000.dwc3" > /dev/kmsg
+
+exit 0

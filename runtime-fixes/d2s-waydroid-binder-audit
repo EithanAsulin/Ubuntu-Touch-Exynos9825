@@ -1,0 +1,57 @@
+#!/bin/sh
+set -u
+
+[ "$(id -u)" -eq 0 ] || {
+    echo "Run this helper with sudo." >&2
+    exit 1
+}
+
+out=/home/phablet/d2s-waydroid-binder-audit.txt
+exec >"$out" 2>&1
+
+echo '=== timestamp ==='
+date -Ins
+
+echo '=== waydroid status ==='
+waydroid status || true
+
+echo '=== host binder devices ==='
+stat -Lc '%t:%T inode=%i mode=%a %n' \
+    /dev/binder /dev/hwbinder /dev/vndbinder \
+    /dev/anbox-binder /dev/anbox-hwbinder /dev/anbox-vndbinder || true
+
+echo '=== container binder devices ==='
+lxc-attach -P /var/lib/waydroid/lxc -n waydroid -- \
+    /system/bin/stat -c '%t:%T inode=%i mode=%a %n' \
+    /dev/binder /dev/hwbinder /dev/vndbinder /dev/host_hwbinder || true
+
+echo '=== container properties ==='
+for prop in sys.boot_completed init.svc.bootanim init.svc.vendor.vibrator-1-0 init.svc.vendor.sensors-hal-1-0; do
+    printf '%s=' "$prop"
+    lxc-attach -P /var/lib/waydroid/lxc -n waydroid -- /system/bin/getprop "$prop" || true
+done
+
+echo '=== lshal ==='
+lxc-attach -P /var/lib/waydroid/lxc -n waydroid -- /system/bin/lshal --neat || true
+
+echo '=== binder file descriptors ==='
+for name in hwservicemanager vibrator@1.0-service.waydroid system_server; do
+    for pid in $(pgrep -f "$name" || true); do
+        echo "--- $name pid=$pid ---"
+        grep -E '^(Name|Pid|PPid|NSpid):' "/proc/$pid/status" || true
+        ls -l "/proc/$pid/fd" 2>&1 | grep -E 'binder|/dev/' || true
+    done
+done
+
+echo '=== binder debug entries ==='
+for pid in $(pgrep -f 'hwservicemanager|vibrator@1.0-service.waydroid|system_server' || true); do
+    for base in /sys/kernel/debug/binder/proc /d/binder/proc; do
+        if [ -r "$base/$pid" ]; then
+            echo "--- $base/$pid ---"
+            sed -n '1,240p' "$base/$pid"
+        fi
+    done
+done
+
+chmod 0644 "$out"
+echo "Wrote $out" >/dev/console 2>/dev/null || true

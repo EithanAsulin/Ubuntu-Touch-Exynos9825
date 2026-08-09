@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+# Lomiri provides an XWayland display for desktop Linux applications. Chrome's
+# native Wayland and EGL paths do not initialize on the current D2S framebuffer
+# backend, while this X11/software-compositing path is verified to play YouTube
+# with working PulseAudio on the physical N975F.
+uid="$(id -u)"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
+export DISPLAY="${DISPLAY:-:0}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+export PULSE_SERVER="${PULSE_SERVER:-unix:$XDG_RUNTIME_DIR/pulse/native}"
+export CHROME_VERSION_EXTRA=stable
+export GNOME_DISABLE_CRASH_DIALOG=SET_BY_GOOGLE_CHROME
+
+exec /opt/google/chrome/chrome \
+    --no-sandbox \
+    --disable-dev-shm-usage \
+    --ozone-platform=x11 \
+    --no-first-run \
+    --disable-session-crashed-bubble \
+    --autoplay-policy=no-user-gesture-required \
+    "$@"

@@ -1,0 +1,11 @@
+[Unit]
+Description=Install D2S Android audio compatibility bindings
+DefaultDependencies=no
+Requires=mount-android-system.service mount-halium-overlay.service mount-android-partitions.service
+After=mount-android-system.service mount-halium-overlay.service mount-android-partitions.service
+Before=lxc-android-config.service systemd-udev-trigger.service sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/d2s-android-compat
+RemainAfterExit=yes

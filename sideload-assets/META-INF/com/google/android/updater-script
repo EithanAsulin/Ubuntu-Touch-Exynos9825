@@ -1,0 +1,60 @@
+assert(getprop("ro.product.device") == "d2s" ||
+       getprop("ro.build.product") == "d2s" ||
+       abort("E3004: This package is only for Samsung d2s; detected " +
+             getprop("ro.product.device") + "."));
+assert(getprop("ro.boot.em.model") == "SM-N975F" ||
+       abort("E3004: This package is only for SM-N975F; detected " +
+             getprop("ro.boot.em.model") + "."));
+
+ui_print("");
+ui_print("Ubuntu Touch Focal for Samsung Note10+ (d2s/N975F)");
+ui_print("Targets: physical SYSTEM, VENDOR, BOOT and USERDATA");
+ui_print("WARNING: USERDATA will be erased and rebuilt as ext4");
+ui_print("RECOVERY, VBMETA, DTBO, MODEM and EFS are preserved");
+ui_print("");
+
+assert(run_program("/system/bin/sh", "-c",
+       "test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/system)\" = 6502219776 && test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/vendor)\" = 1331691520 && test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/boot)\" = 57671680 && test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/userdata)\" = 246016901120 && ! grep -q '^/dev/block/platform/13d60000.ufs/by-name/system ' /proc/mounts && ! grep -q '^/dev/block/platform/13d60000.ufs/by-name/vendor ' /proc/mounts && ! grep -q ' /system ' /proc/mounts && ! grep -q ' /system_root ' /proc/mounts && ! grep -q ' /vendor ' /proc/mounts") == 0 ||
+       abort("E1001: Partition geometry mismatch or SYSTEM/VENDOR is mounted."));
+
+show_progress(0.740000, 0);
+ui_print("Writing verified Ubuntu Touch SYSTEM image...");
+assert(package_extract_file("ubuntu.img",
+       "/dev/block/platform/13d60000.ufs/by-name/system") ||
+       abort("E1001: Failed to write physical SYSTEM."));
+
+show_progress(0.230000, 0);
+ui_print("Writing pinned Halium 11 D2S VENDOR image...");
+assert(package_extract_file("vendor.img",
+       "/dev/block/platform/13d60000.ufs/by-name/vendor") ||
+       abort("E1001: Failed to write physical VENDOR."));
+
+show_progress(0.020000, 0);
+ui_print("Writing verified Ubuntu Touch BOOT image...");
+assert(package_extract_file("boot.img",
+       "/dev/block/platform/13d60000.ufs/by-name/boot") ||
+       abort("E1001: Failed to write BOOT."));
+
+ui_print("Unmounting and rebuilding the full USERDATA partition...");
+assert(run_program("/system/bin/sh", "-c",
+       "dev=/dev/block/platform/13d60000.ufs/by-name/userdata; umount /data >/dev/null 2>&1 || true; umount /userdata >/dev/null 2>&1 || true; umount /tmp/d2s-userdata-check >/dev/null 2>&1 || true; ! grep -qE ' (/data|/userdata) ' /proc/mounts && test \"$(/system/bin/blockdev --getsize64 \"$dev\")\" = 246016901120 && /system/bin/mke2fs -t ext4 -F -b 4096 -m 0 -L userdata -E nodiscard -O ^orphan_file,^metadata_csum_seed \"$dev\" >/tmp/d2s-mke2fs.log 2>&1 && /system/bin/e2fsck -fy \"$dev\" >/tmp/d2s-e2fsck.log 2>&1 && mkdir -p /tmp/d2s-userdata-check && mount -t ext4 -o rw \"$dev\" /tmp/d2s-userdata-check && mkdir -p /tmp/d2s-userdata-check/waydroid-staging && touch /tmp/d2s-userdata-check/.ubuntu-touch-d2s-ext4") == 0 ||
+       abort("E1001: USERDATA ext4 creation or verification failed. See /tmp/d2s-*.log."));
+
+ui_print("Staging verified offline Waydroid ARM64 images...");
+assert(package_extract_file("waydroid-system.zip",
+       "/tmp/d2s-userdata-check/waydroid-staging/waydroid-system.zip") ||
+       abort("E1001: Failed to stage Waydroid system image."));
+assert(package_extract_file("waydroid-vendor.zip",
+       "/tmp/d2s-userdata-check/waydroid-staging/waydroid-vendor.zip") ||
+       abort("E1001: Failed to stage Waydroid vendor image."));
+assert(run_program("/system/bin/sh", "-c",
+       "cd /tmp/d2s-userdata-check/waydroid-staging && printf 'c4b45fad36bee7c0db8a1d9315a5be0035520c53d3d005a807735ae9b7ee79cf  waydroid-system.zip\\n5b48a2771e77ff9085862f58b5c9d852d439d5e57dd38ea33b58381c2b14ca48  waydroid-vendor.zip\\n' >/tmp/d2s-waydroid.sha256 && /system/bin/toybox sha256sum -c /tmp/d2s-waydroid.sha256 && sync && cd / && (umount /tmp/d2s-userdata-check || umount -l /tmp/d2s-userdata-check) && ! grep -q ' /tmp/d2s-userdata-check ' /proc/mounts") == 0 ||
+       abort("E1001: Waydroid image verification or USERDATA unmount failed."));
+
+set_progress(1.000000);
+ui_print("");
+ui_print("Install complete.");
+ui_print("USERDATA ext4 verified; do NOT run recovery Format Data.");
+ui_print("Waydroid will finish offline initialization on first boot.");
+ui_print("Reboot directly into Ubuntu Touch.");
+ui_print("");

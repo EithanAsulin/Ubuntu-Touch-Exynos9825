@@ -1,0 +1,15 @@
+service vendor.hwcomposer-2-2 /vendor/bin/hw/android.hardware.graphics.composer@2.2-service
+    interface android.hardware.graphics.composer@2.1::IComposer default
+    interface android.hardware.graphics.composer@2.2::IComposer default
+    class hal animation
+    user system
+    group graphics drmrpc
+    capabilities SYS_NICE
+    onrestart restart surfaceflinger
+    writepid /dev/cpuset/system-background/tasks
+
+# Halium's reduced Android boot does not trigger the normal late-init action
+# that starts class hal.  Load HWC while its module is still visible; Mir later
+# hides the legacy module and talks to this binderized service through HWC2.
+on init
+    start vendor.hwcomposer-2-2

@@ -1,0 +1,30 @@
+assert(getprop("ro.product.device") == "d2s" ||
+       getprop("ro.build.product") == "d2s" ||
+       abort("E3004: Expected Samsung d2s recovery."));
+
+ui_print("");
+ui_print("D2S USERDATA ext4 formatter");
+ui_print("Erases ONLY the userdata partition and reformats it as ext4");
+ui_print("so the Halium kernel can mount it reliably.");
+ui_print("");
+
+assert(run_program("/system/bin/sh", "-c",
+       "set -x; "
+       "test \"$(getprop ro.product.device)\" = d2s -o \"$(getprop ro.build.product)\" = d2s; "
+       "dev=/dev/block/platform/13d60000.ufs/by-name/userdata; "
+       "size=$(blockdev --getsize64 $dev); "
+       "test \"$size\" = 246016901120 || { echo \"UNEXPECTED USERDATA SIZE $size\"; exit 1; }; "
+       "umount /data 2>/dev/null || true; "
+       "mke2fs -t ext4 -F -b 4096 -m 0 -L userdata -E nodiscard -O ^orphan_file,^metadata_csum_seed $dev >/tmp/d2s-mke2fs.log 2>&1; "
+       "rc=$?; "
+       "e2fsck -fn $dev >/tmp/d2s-e2fsck.log 2>&1; "
+       "echo \"mke2fs_rc=$rc\"; "
+       "cat /tmp/d2s-mke2fs.log; "
+       "cat /tmp/d2s-e2fsck.log; "
+       "test $rc = 0"
+       ) == 0 ||
+       abort("Failed to format userdata as ext4."));
+
+ui_print("USERDATA formatted as ext4 successfully.");
+ui_print("Boot into Ubuntu Touch. It will mount userdata as ext4.");
+ui_print("");

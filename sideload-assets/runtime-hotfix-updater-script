@@ -1,0 +1,34 @@
+assert(getprop("ro.product.device") == "d2s" ||
+       getprop("ro.build.product") == "d2s" ||
+       abort("E3004: This package is only for Samsung d2s."));
+assert(getprop("ro.boot.em.model") == "SM-N975F" ||
+       abort("E3004: This package is only for SM-N975F."));
+
+ui_print("");
+ui_print("D2S Focal runtime repair");
+ui_print("Audio HAL + haptics firmware + Waydroid binder + GST tools");
+ui_print("USERDATA, VENDOR, RECOVERY, MODEM and EFS are preserved");
+ui_print("");
+
+assert(run_program("/system/bin/sh", "-c",
+       "test \"$(/system/bin/blockdev --getsize64 /dev/block/platform/13d60000.ufs/by-name/system)\" = 6502219776 && mkdir -p /mnt/ut-system && mount -t ext4 -o rw /dev/block/platform/13d60000.ufs/by-name/system /mnt/ut-system && test -x /mnt/ut-system/usr/sbin/sshd && test -f /mnt/ut-system/usr/lib/waydroid/tools/helpers/drivers.py && mkdir -p /mnt/ut-system/usr/local/sbin /mnt/ut-system/etc/systemd/system/lxc-android-config.service.d") == 0 ||
+       abort("E1001: Could not safely mount the Ubuntu Touch SYSTEM partition."));
+
+ui_print("Installing verified system-side runtime repairs...");
+assert(package_extract_dir("rootfs", "/mnt/ut-system") ||
+       abort("E1001: Failed to extract runtime repair files."));
+
+assert(run_program("/system/bin/sh", "-c",
+       "root=/mnt/ut-system; chmod 0755 \"$root/usr/local/sbin/d2s-android-compat\" \"$root/usr/local/sbin/d2s-waydroid-offline-init\" \"$root/usr/bin/gst-inspect-1.0\" \"$root/usr/bin/gst-launch-1.0\" \"$root/usr/bin/gst-typefind-1.0\" && chmod 0644 \"$root/etc/systemd/system/d2s-android-compat.service\" \"$root/etc/systemd/system/lxc-android-config.service.d/d2s-compat.conf\" \"$root/etc/systemd/system/d2s-waydroid-offline-init.service\" \"$root/usr/lib/waydroid/tools/helpers/drivers.py\" && grep -q \"Before=lxc-android-config.service\" \"$root/etc/systemd/system/d2s-android-compat.service\" && grep -q \"for node in BINDER_DRIVERS:\" \"$root/usr/lib/waydroid/tools/helpers/drivers.py\" && grep -q \"Preserve already verified images\" \"$root/usr/local/sbin/d2s-waydroid-offline-init\" && sync && umount /mnt/ut-system") == 0 ||
+       abort("E1001: Runtime repair verification or SYSTEM unmount failed."));
+
+ui_print("Writing boot image with pinned CS40L25A haptic firmware...");
+assert(package_extract_file("boot.img",
+       "/dev/block/platform/13d60000.ufs/by-name/boot") ||
+       abort("E1001: Failed to write BOOT."));
+
+set_progress(1.000000);
+ui_print("");
+ui_print("Runtime repair installed with zero USERDATA changes.");
+ui_print("Reboot directly into Ubuntu Touch.");
+ui_print("");

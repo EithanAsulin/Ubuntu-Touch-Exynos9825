@@ -1,0 +1,38 @@
+include:
+  - https://gitlab.com/ubports/porting/community-ports/halium-generic-adaptation-build-tools/-/raw/main/gsi-port-ci.yml
+
+image: ubuntu:20.04
+
+build:
+  rules:
+   - when: never
+
+flashable:
+  rules:
+   - when: never
+
+devel-flashable:
+  rules:
+   - when: never
+
+build-d2s:
+  extends: build
+  before_script:
+    - ln -sf deviceinfo-d2s deviceinfo
+  rules:
+   - if: $CI_PIPELINE_SOURCE == "push"
+
+devel-flashable-d2s:
+  extends: [devel-flashable]
+  needs: [build-d2s]
+  before_script:
+    - ln -sf deviceinfo-d2s deviceinfo
+  rules:
+   - if: $CI_PIPELINE_SOURCE == "push"
+
+flashable-d2s:
+  extends: [flashable]
+  needs: [build-d2s]
+  before_script:
+    - ln -sf deviceinfo-d2s deviceinfo
+  when: manual

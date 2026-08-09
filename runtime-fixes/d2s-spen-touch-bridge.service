@@ -1,0 +1,13 @@
+[Unit]
+Description=D2S S Pen single-touch compatibility bridge
+After=graphical-session-pre.target
+PartOf=ubuntu-touch-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/d2s-spen-touch-bridge /dev/input/event4
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=ubuntu-touch-session.target

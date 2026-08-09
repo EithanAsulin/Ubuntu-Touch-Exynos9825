@@ -1,0 +1,493 @@
+diff --git a/prepare-fake-ota.sh b/prepare-fake-ota.sh
+index 89f3af2..d1f6d3a 100755
+--- a/prepare-fake-ota.sh
++++ b/prepare-fake-ota.sh
+@@ -4,6 +4,33 @@ if [[ $(id -u) -ne 0 ]] ; then
+     exec fakeroot -- $0 $*
+ fi
+ 
++if [ -z "${SSH_PUBLIC_KEY_FILE:-}" ] || [ ! -f "$SSH_PUBLIC_KEY_FILE" ]; then
++    echo "SSH_PUBLIC_KEY_FILE must point to a readable SSH public key" >&2
++    exit 1
++fi
++SSH_PUBLIC_KEY_FILE="$(realpath "$SSH_PUBLIC_KEY_FILE")"
++
++GST_TOOLS_DEB="${GST_TOOLS_DEB:-$(pwd)/workdir/gstreamer1.0-tools_1.16.3-0ubuntu1.2_arm64.deb}"
++GST_TOOLS_SHA256="f6778cff4b49694fe2f1c8319d726d518f076efca79deb9d329b958c9f86e4d8"
++if [ ! -f "$GST_TOOLS_DEB" ] || \
++   [ "$(sha256sum "$GST_TOOLS_DEB" | awk '{print $1}')" != "$GST_TOOLS_SHA256" ]; then
++    echo "GST_TOOLS_DEB must point to the pinned Ubuntu Focal arm64 package" >&2
++    exit 1
++fi
++GST_TOOLS_DEB="$(realpath "$GST_TOOLS_DEB")"
++
++CHROME_DEB="${CHROME_DEB:-$(pwd)/workdir/google-chrome-stable_current_arm64.deb}"
++CHROME_DEB_SHA256="e2cf40d5bf75e5dd6ce48bc5473979fa1ff4258b45d6371bbab887db9d361bae"
++if [ ! -f "$CHROME_DEB" ] || \
++   [ "$(sha256sum "$CHROME_DEB" | awk '{print $1}')" != "$CHROME_DEB_SHA256" ]; then
++    echo "CHROME_DEB must point to the verified Google Chrome 151 arm64 package" >&2
++    exit 1
++fi
++test "$(dpkg-deb -f "$CHROME_DEB" Package)" = google-chrome-stable
++test "$(dpkg-deb -f "$CHROME_DEB" Version)" = 151.0.7922.75-1
++test "$(dpkg-deb -f "$CHROME_DEB" Architecture)" = arm64
++CHROME_DEB="$(realpath "$CHROME_DEB")"
++
+ HERE=$(pwd)
+ SCRIPT="$(dirname "$(realpath "$0")")"/build
+ if [ ! -d "$SCRIPT" ]; then
+@@ -140,17 +167,320 @@ cd "$OUTPUT/rootfs"
+ print_header "Extracting rootfs..."
+ XZ_OPT="-T0" tar xpzf "../$file" --numeric-owner -C system
+ 
+-# Enable SSH and USB tethering, and disable secure ADBD, for debugging in devel-flashable builds
++# Enable key-only SSH and persistent USB networking for devel-flashable builds.
++# Password login, empty passwords, and unauthenticated ADB remain disabled.
+ echo "start on startup" > system/etc/init/ssh.override
+-echo "exec /usr/sbin/sshd -D -o PasswordAuthentication=yes -o PermitEmptyPasswords=yes" >> system/etc/init/ssh.override
++echo "exec /usr/sbin/sshd -D -o PasswordAuthentication=no -o ChallengeResponseAuthentication=no -o PermitEmptyPasswords=no -o PubkeyAuthentication=yes" >> system/etc/init/ssh.override
++
++mkdir -p system/etc/ssh/sshd_config.d
++cat >system/etc/ssh/sshd_config.d/00-d2s-key-only.conf <<EOF
++PasswordAuthentication no
++KbdInteractiveAuthentication no
++ChallengeResponseAuthentication no
++PermitEmptyPasswords no
++PubkeyAuthentication yes
++PermitRootLogin no
++AuthenticationMethods publickey
++EOF
++chmod 0644 system/etc/ssh/sshd_config.d/00-d2s-key-only.conf
++
++mkdir -p system/etc/systemd/system/multi-user.target.wants
++ln -sfn /usr/lib/systemd/system/ssh.service \
++    system/etc/systemd/system/multi-user.target.wants/ssh.service
++rm -f system/etc/systemd/system/multi-user.target.wants/ssh-property-migration.service
++ln -sfn /dev/null system/etc/systemd/system/ssh-property-migration.service
++
++PHABLET_HOME="system/home/phablet"
++if [ ! -d "$PHABLET_HOME" ]; then
++    echo "Ubuntu Touch rootfs has no phablet home directory" >&2
++    exit 1
++fi
++mkdir -p "$PHABLET_HOME/.ssh"
++chmod 700 "$PHABLET_HOME/.ssh"
++cp "$SSH_PUBLIC_KEY_FILE" "$PHABLET_HOME/.ssh/authorized_keys"
++chmod 600 "$PHABLET_HOME/.ssh/authorized_keys"
++chown --reference="$PHABLET_HOME" "$PHABLET_HOME/.ssh" "$PHABLET_HOME/.ssh/authorized_keys"
++
++# The D2S H11 vendor needs the port's binder-domain-compatible replacement.
++VNDSERVICE_SOURCE="$HERE/workdir/downloads/ubports-samsung-exynos9825-h11/overlay/system/usr/share/halium-overlay/vendor/bin/vndservicemanager"
++VNDSERVICE_SHA256="0b884bd2c085fefbcc945f7494cf792847b276b2844f643d56e7492e228621f1"
++test -f "$VNDSERVICE_SOURCE"
++test "$(sha256sum "$VNDSERVICE_SOURCE" | awk '{print $1}')" = "$VNDSERVICE_SHA256"
++mkdir -p system/opt/halium-overlay/vendor/bin
++install -m 0755 "$VNDSERVICE_SOURCE" \
++    system/opt/halium-overlay/vendor/bin/vndservicemanager
++
++# The initramfs owns the D2S USB gadget for its entire lifetime. Samsung's
++# configfs implementation can panic when a function is unlinked and relinked,
++# so mask every userspace gadget owner and only configure the resulting usb0.
++for unit in usb-moded.service usb-rescue-mode-off.service usb-tethering.service; do
++    ln -sfn /dev/null "system/etc/systemd/system/$unit"
++done
++rm -f system/etc/init/usb-tethering.conf
++
++mkdir -p system/usr/local/sbin
++cat >system/usr/local/sbin/d2s-static-rndis-network <<'EOF'
++#!/bin/sh
++set -eu
++
++tries=0
++netdev=""
++while [ -z "$netdev" ]; do
++    for candidate in usb0 rndis0; do
++        if ip link show "$candidate" >/dev/null 2>&1; then
++            netdev="$candidate"
++            break
++        fi
++    done
++    [ -n "$netdev" ] && break
++    tries=$((tries + 1))
++    [ "$tries" -lt 60 ] || exit 1
++    sleep 1
++done
++
++ip link set dev "$netdev" up
++ip address replace 10.15.19.82/24 dev "$netdev"
++install -d -m 0755 /var/lib/dhcp
++touch /var/lib/dhcp/dhcpd.leases
++exec /usr/sbin/dhcpd -4 -f -q \
++    -cf /etc/hybris-usb/dhcpd.conf \
++    -pf /run/d2s-static-rndis-dhcpd.pid "$netdev"
++EOF
++chmod 0755 system/usr/local/sbin/d2s-static-rndis-network
++
++cat >system/etc/systemd/system/d2s-static-rndis-network.service <<EOF
++[Unit]
++Description=D2S static RNDIS network and DHCP server
++Wants=systemd-udev-settle.service
++After=local-fs.target systemd-udev-settle.service
++Before=network.target
++
++[Service]
++Type=simple
++ExecStart=/usr/local/sbin/d2s-static-rndis-network
++Restart=on-failure
++RestartSec=2
++
++[Install]
++WantedBy=multi-user.target
++EOF
++ln -sfn /etc/systemd/system/d2s-static-rndis-network.service \
++    system/etc/systemd/system/multi-user.target.wants/d2s-static-rndis-network.service
+ 
+-echo "start on startup" > system/etc/init/usb-tethering.conf
+-echo "exec /bin/bash /usr/bin/usb-tethering" >> system/etc/init/usb-tethering.conf
++# The Exynos9825 panel can be blanked through HWC2, but its wake event is not
++# propagated back through this Halium stack.  Keep the panel requested on so a
++# working Lomiri session cannot become permanently invisible after inactivity.
++cat >system/etc/systemd/system/d2s-keep-display-on.service <<EOF
++[Unit]
++Description=Keep the D2S display on (wake-path compatibility)
++Requires=repowerd.service
++After=repowerd.service lightdm.service
++
++[Service]
++Type=simple
++ExecStart=/usr/sbin/repowerd-cli display on
++Restart=always
++RestartSec=2
++
++[Install]
++WantedBy=multi-user.target
++EOF
++ln -sfn /etc/systemd/system/d2s-keep-display-on.service \
++    system/etc/systemd/system/multi-user.target.wants/d2s-keep-display-on.service
++
++# qtmir renders correctly on the D2S framebuffer path but never emits the
++# systemd READY notification expected by the stock greeter unit.  Without this
++# override systemd kills the visible UI at TimeoutStartSec every two minutes.
++mkdir -p system/etc/systemd/user/lomiri-full-greeter.service.d
++cat >system/etc/systemd/user/lomiri-full-greeter.service.d/d2s-compat.conf <<EOF
++[Service]
++Type=simple
++TimeoutStartSec=0
++TimeoutStopSec=5
++EOF
++
++# Type=simple makes Lomiri ordering non-blocking, so Maliit must explicitly
++# wait for qtmir's client socket rather than exhausting its restart burst while
++# the shell is still coming up.
++mkdir -p system/etc/systemd/user/maliit-server.service.d
++cat >system/etc/systemd/user/maliit-server.service.d/d2s-compat.conf <<'EOF'
++[Unit]
++StartLimitIntervalSec=0
++
++[Service]
++ExecStartPre=/bin/sh -c 'while [ ! -S /run/user/32011/mir_socket ]; do sleep 1; done'
++RestartSec=2
++EOF
++
++# The Samsung Wacom driver exposes the S Pen through the legacy ABS_X/ABS_Y
++# single-touch protocol.  Mir detects that node but does not dispatch its pen
++# contacts.  Translate only actual BTN_TOUCH contacts into a conventional
++# protocol-B direct touchscreen; hover remains suppressed.
++install -D -m 0755 "$HERE/runtime-fixes/d2s-spen-touch-bridge" \
++    system/usr/local/bin/d2s-spen-touch-bridge
++install -D -m 0644 "$HERE/runtime-fixes/d2s-spen-touch-bridge.service" \
++    system/etc/systemd/user/d2s-spen-touch-bridge.service
++mkdir -p system/etc/systemd/user/ubuntu-touch-session.target.wants
++ln -sfn /etc/systemd/user/d2s-spen-touch-bridge.service \
++    system/etc/systemd/user/ubuntu-touch-session.target.wants/d2s-spen-touch-bridge.service
++
++# Audio uses the Android 11 HIDL compatibility wrapper supplied by the D2S
++# overlay. API 30's droid module does not match that wrapper ABI; API 29 does.
++# Loading only Samsung's primary stream also avoids the unusable microphone and
++# secondary-output probes that crash or stall card initialization. This exact
++# speaker path was verified on the physical D2S device.
++rm -f system/etc/systemd/user/pulseaudio.service \
++    system/etc/systemd/user/pulseaudio.socket
++test -f system/usr/lib/pulse-13.99.1/modules/module-droid-card-29.so
++test -f system/usr/lib/pulse-13.99.1/modules/module-droid-hidl.so
++install -D -m 0644 "$HERE/runtime-fixes/d2s-audio-policy.xml" \
++    system/etc/pulse/d2s-audio-policy.xml
++test "$(grep -c '^load-module module-droid-discover voice_virtual_stream=true' \
++    system/etc/pulse/touch.pa)" = 1
++sed -i \
++    '/^### Automatically load the Pulseaudio Droid$/,/^\.endif$/c\
++### Load the verified Samsung D2S API-29 primary speaker path\
++load-module module-droid-card-29 module_id=primary voice_virtual_stream=true config=/etc/pulse/d2s-audio-policy.xml\
++load-module module-droid-hidl helper=false' \
++    system/etc/pulse/touch.pa
++grep -q '^load-module module-droid-card-29 .*d2s-audio-policy.xml$' \
++    system/etc/pulse/touch.pa
++
++# The upstream D2S port expresses this bind in an obsolete Upstart job. Focal
++# boots Halium through systemd, so make the compatibility wrapper an explicit
++# prerequisite of Android container initialization.
++install -D -m 0755 "$HERE/runtime-fixes/d2s-android-compat" \
++    system/usr/local/sbin/d2s-android-compat
++install -D -m 0644 "$HERE/runtime-fixes/d2s-android-compat.service" \
++    system/etc/systemd/system/d2s-android-compat.service
++install -D -m 0644 "$HERE/runtime-fixes/lxc-android-config-d2s.conf" \
++    system/etc/systemd/system/lxc-android-config.service.d/d2s-compat.conf
++install -D -m 0755 "$HERE/runtime-fixes/d2s-android-audio-start" \
++    system/usr/local/sbin/d2s-android-audio-start
++install -D -m 0644 "$HERE/runtime-fixes/d2s-android-audio.service" \
++    system/etc/systemd/system/d2s-android-audio.service
++ln -sfn /etc/systemd/system/d2s-android-audio.service \
++    system/etc/systemd/system/multi-user.target.wants/d2s-android-audio.service
++install -D -m 0755 "$HERE/runtime-fixes/d2s-wait-android-audio" \
++    system/usr/local/bin/d2s-wait-android-audio
++mkdir -p system/etc/systemd/user/pulseaudio.service.d
++cat >system/etc/systemd/user/pulseaudio.service.d/d2s-audio.conf <<'EOF'
++[Unit]
++StartLimitIntervalSec=0
++
++[Service]
++ExecStartPre=/usr/local/bin/d2s-wait-android-audio
++RestartSec=2
++EOF
++
++# Morph's QtWebEngine migration left the old Oxide per-site UA assignment as
++# a write to an undefined QML global. Repair the profile API, use a supported
++# YouTube identity, and translate Android intent URLs back to HTTPS.
++patch --batch --forward -d system -p1 < \
++    "$HERE/runtime-fixes/morph-youtube-focal.patch"
++grep -q 'property var userAgentOverrides' \
++    system/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/MorphWebContext.qml
++grep -q 'Chrome/131.0.0.0' \
++    system/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/ua-overrides-mobile.js
++grep -q 'targetUrl.indexOf("intent://")' \
++    system/usr/lib/aarch64-linux-gnu/qt5/qml/Morph/Web/MorphWebView.qml
++install -D -m 0644 "$HERE/runtime-fixes/d2s-morph-apparmor-local" \
++    system/etc/apparmor.d/local/usr.bin.morph-browser
++
++# Focal's QtWebEngine is Chromium 87 and modern YouTube rejects its playback
++# path. Install the exact Google ARM64 build verified on the physical phone,
++# but route it through the D2S-compatible XWayland and PulseAudio environment.
++# The local package is checksum-pinned and is intentionally excluded from Git.
++dpkg-deb -x "$CHROME_DEB" system
++rm -f system/etc/cron.daily/google-chrome
++rm -rf system/opt/google/chrome/cron
++install -D -m 0755 "$HERE/runtime-fixes/d2s-chrome" \
++    system/usr/local/bin/d2s-chrome
++install -D -m 0644 "$HERE/runtime-fixes/d2s-google-chrome.desktop" \
++    system/usr/share/applications/google-chrome.desktop
++cp system/usr/share/applications/google-chrome.desktop \
++    system/usr/share/applications/com.google.Chrome.desktop
++ln -sfn /usr/local/bin/d2s-chrome system/usr/bin/google-chrome-stable
++ln -sfn /usr/local/bin/d2s-chrome system/usr/bin/google-chrome
++test "$(sha256sum system/opt/google/chrome/chrome | awk '{print $1}')" = \
++    2810e63c1e8a9eeecee49be53f72367c199cef09b657c183aaab2440a005a27e
++test "$(sha256sum system/opt/google/chrome/WidevineCdm/_platform_specific/linux_arm64/libwidevinecdm.so | awk '{print $1}')" = \
++    e43843b7d42c486fc146b3009a87548ece55667e4e117fa1b2c5cdeb2ca35783
++
++# These optional services either fight the initramfs-owned USB gadget or enter
++# tight failure/restart loops against unavailable camera, location and modem
++# HALs. They can starve Lomiri and make working touch input appear frozen.
++for unit in \
++    mtp-server-usb-moded-watcher.service \
++    lomiri-location-service-trust-stored.service \
++    cameraservice-trust-stored.service \
++    ofono-setup.service \
++    telephony-service-approver.service \
++    telephony-service-indicator.service \
++    tone-generator.service \
++    audiosystem-passthrough-af.service \
++    audiosystem-passthrough-qti.service; do
++    ln -sfn /dev/null "system/etc/systemd/user/$unit"
++done
++
++# Morph's QtWebEngine already contains UBports' HybrisMediaCodecVideoDecoder.
++# Do not inject the separate gst-hybris plugin: on this Halium 11 device its
++# plugin initialization blocks gst-plugin-scanner and leaves media-hub in a
++# permanent 90-second restart loop.
++rm -f \
++    system/usr/lib/aarch64-linux-gnu/gstreamer-1.0/libgsthybris.so \
++    system/usr/lib/aarch64-linux-gnu/gstreamer-1.0/libgsthybrissink.so
++dpkg-deb -x "$GST_TOOLS_DEB" system
++test ! -e system/usr/lib/aarch64-linux-gnu/gstreamer-1.0/libgsthybris.so
++test ! -e system/usr/lib/aarch64-linux-gnu/gstreamer-1.0/libgsthybrissink.so
++test -x system/usr/bin/gst-inspect-1.0
++
++# Recovery stages the official Waydroid ARM64/Halium 11 image archives on the
++# persistent userdata filesystem. Expand and initialize them once, offline,
++# so broken Wi-Fi cannot block first setup.
++install -D -m 0755 "$HERE/runtime-fixes/d2s-waydroid-offline-init" \
++    system/usr/local/sbin/d2s-waydroid-offline-init
++install -D -m 0644 "$HERE/runtime-fixes/d2s-waydroid-offline-init.service" \
++    system/etc/systemd/system/d2s-waydroid-offline-init.service
++test "$(sha256sum system/usr/lib/waydroid/tools/helpers/drivers.py | awk '{print $1}')" = \
++    e458a926373370f9771cc74e6fea879299495516dd8f0fbe0c0c40baf44ac174
++install -m 0644 "$HERE/runtime-fixes/waydroid-drivers.py" \
++    system/usr/lib/waydroid/tools/helpers/drivers.py
++# xtables on the Focal host does not support this nftables option.  Leaving it
++# in makes waydroid-net fail before the Android container gets an interface.
++test "$(grep -c -- '--checksum-fill' \
++    system/usr/lib/waydroid/data/scripts/waydroid-net.sh)" = 2
++sed -i '/--checksum-fill/d' \
++    system/usr/lib/waydroid/data/scripts/waydroid-net.sh
++ln -sfn /etc/systemd/system/d2s-waydroid-offline-init.service \
++    system/etc/systemd/system/multi-user.target.wants/d2s-waydroid-offline-init.service
++mkdir -p system/usr/share/waydroid-extra
++ln -sfn /userdata/waydroid-images system/usr/share/waydroid-extra/images
++
++# Lomiri synchronously asks for this optional modem helper during startup.  On
++# D2S it never becomes ready and every activation blocks the shell for 120s.
++# A per-user D-Bus override fails immediately instead.
++mkdir -p "$PHABLET_HOME/.local/share/dbus-1/services"
++cat >"$PHABLET_HOME/.local/share/dbus-1/services/com.lomiri.TelephonyServiceHandler.service" <<EOF
++[D-BUS Service]
++Name=com.lomiri.TelephonyServiceHandler
++Exec=/bin/false
++EOF
++cat >"$PHABLET_HOME/.local/share/dbus-1/services/org.freedesktop.Telepathy.Client.TelephonyServiceHandler.service" <<EOF
++[D-BUS Service]
++Name=org.freedesktop.Telepathy.Client.TelephonyServiceHandler
++Exec=/bin/false
++EOF
++chown --reference="$PHABLET_HOME" \
++    "$PHABLET_HOME/.local" \
++    "$PHABLET_HOME/.local/share" \
++    "$PHABLET_HOME/.local/share/dbus-1" \
++    "$PHABLET_HOME/.local/share/dbus-1/services" \
++    "$PHABLET_HOME/.local/share/dbus-1/services/"*.service
+ 
+ cat >system/etc/default/adbd <<EOF
+-# This file is overwritten by prepare-fake-ota.sh to disable ADBD's host key
+-# verification ("secure ADBD") by default, to aid in debugging.
+-ADBD_SECURE=0
++# Keep ADB host-key verification enabled in generated images.
++ADBD_SECURE=1
+ EOF
+ 
+ print_header "Repacking rootfs..."
+diff --git a/system-image-from-ota.sh b/system-image-from-ota.sh
+index 7e3b670..746b497 100755
+--- a/system-image-from-ota.sh
++++ b/system-image-from-ota.sh
+@@ -8,14 +8,18 @@ SRC="$(realpath $(dirname "$1" 2>/dev/null || echo 'src'))"
+ OUT="$(realpath "$2" 2>/dev/null || echo 'out')"
+ 
+ source "${HERE}/deviceinfo"
++SYSTEM_IMAGE_WORKDIR="${SYSTEM_IMAGE_WORKDIR:-/tmp/system-image}"
++case "$SYSTEM_IMAGE_WORKDIR" in
++    ""|/) echo "Unsafe SYSTEM_IMAGE_WORKDIR" >&2; exit 1 ;;
++esac
+ 
+ logit() {
+     echo "System image: $1"
+-    echo "System image: $1" >> /tmp/system-image/system-image-upgrader.log
++    echo "System image: $1" >> "$SYSTEM_IMAGE_WORKDIR/system-image-upgrader.log"
+ }
+ 
+-mkdir -p /tmp/system-image
+-echo "-- System image log --" > /tmp/system-image/system-image-upgrader.log
++mkdir -p "$SYSTEM_IMAGE_WORKDIR"
++echo "-- System image log --" > "$SYSTEM_IMAGE_WORKDIR/system-image-upgrader.log"
+ logit "Starting image Upgrade pre"
+ if [ ! -e "$1" ]; then
+     logit "Command file doesn't exist: $1"
+@@ -29,7 +33,7 @@ REMOVE_LIST="$COMMAND_FILE"
+ # Used as a security check to see if we would change the password
+ DATA_FORMAT=0
+ 
+-TMP=$(mktemp -d -p /tmp/system-image)
++TMP=$(mktemp -d -p "$SYSTEM_IMAGE_WORKDIR")
+ mkdir -p "$OUT"
+ 
+ # System Mountpoint
+@@ -70,7 +74,7 @@ install_keyring() {
+     fi
+ 
+     # Unpacking
+-    TMPDIR=$(mktemp -d -p /tmp/system-image/ tmp.XXXXXXXXXX)
++    TMPDIR=$(mktemp -d -p "$SYSTEM_IMAGE_WORKDIR" tmp.XXXXXXXXXX)
+     cd $TMPDIR
+     xzcat $1 | tar --numeric-owner -xf -
+     if [ ! -e keyring.json ] || [ ! -e keyring.gpg ]; then
+@@ -95,7 +99,7 @@ install_keyring() {
+         return 1
+     fi
+ 
+-    if [ -e /tmp/system-image/$keyring_type ]; then
++    if [ -e "$SYSTEM_IMAGE_WORKDIR/$keyring_type" ]; then
+         rm -Rf $TMPDIR
+         logit "Keyring already loaded: $1"
+         return 1
+@@ -126,11 +130,11 @@ install_keyring() {
+         return 1
+     fi
+ 
+-    mkdir /tmp/system-image/$keyring_type
+-    # chmod 700 /tmp/system-image/$keyring_type
+-    mv $TMPDIR/keyring.gpg /tmp/system-image/$keyring_type/pubring.gpg
+-    # chmod 600 /tmp/system-image/$keyring_type/pubring.gpg
+-    # chown 0:0 /tmp/system-image/$keyring_type/pubring.gpg
++    mkdir "$SYSTEM_IMAGE_WORKDIR/$keyring_type"
++    # chmod 700 "$SYSTEM_IMAGE_WORKDIR/$keyring_type"
++    mv "$TMPDIR/keyring.gpg" "$SYSTEM_IMAGE_WORKDIR/$keyring_type/pubring.gpg"
++    # chmod 600 "$SYSTEM_IMAGE_WORKDIR/$keyring_type/pubring.gpg"
++    # chown 0:0 "$SYSTEM_IMAGE_WORKDIR/$keyring_type/pubring.gpg"
+     rm -Rf $TMPDIR
+     return 0
+ }
+@@ -160,8 +164,8 @@ factory_wipe() {
+ }
+ 
+ # Initialize GPG
+-rm -Rf /tmp/system-image
+-mkdir -p /tmp/system-image
++rm -Rf "$SYSTEM_IMAGE_WORKDIR"
++mkdir -p "$SYSTEM_IMAGE_WORKDIR"
+ if [ -e /etc/system-image/archive-master.tar.xz ]; then
+     logit "Loading keyring: archive-master.tar.xz"
+     install_keyring /etc/system-image/archive-master.tar.xz /etc/system-image/archive-master.tar.xz.asc
+@@ -212,7 +216,11 @@ do
+             case "$2" in
+                 system)
+                     mkdir -p "$SYSTEM_MOUNTPOINT"
+-                    LOOPDEV=$(sudo losetup -f) || true
++                    if [ "${SYSTEM_IMAGE_ROOTLESS:-0}" = "1" ]; then
++                        LOOPDEV=""
++                    else
++                        LOOPDEV=$(sudo losetup -f) || true
++                    fi
+ 
+                     if [ ! -z "$LOOPDEV" ] && [ ! -e "$LOOPDEV" ]; then
+                         sudo mknod "$LOOPDEV" b 7 $(echo "$LOOPDEV" | grep -Eo '[0-9]+$')
+@@ -279,17 +287,29 @@ do
+             fi
+ 
+             # Unpack everything else on top of the system partition
+-            sudo sh -c "xzcat \"$SRC/$2\" | tar --numeric-owner -xf -"
++            if [ "${SYSTEM_IMAGE_ROOTLESS:-0}" = "1" ]; then
++                xzcat "$SRC/$2" | tar --numeric-owner -xf -
++            else
++                sudo sh -c "xzcat \"$SRC/$2\" | tar --numeric-owner -xf -"
++            fi
+             rm -f removed
+ 
+             # Rename system.img to android-rootfs.img until UBPorts CI builds are fixed
+             if [ -e "system/var/lib/lxc/android/system.img" ]; then
+-                sudo mv system/var/lib/lxc/android/system.img system/var/lib/lxc/android/android-rootfs.img
++                if [ "${SYSTEM_IMAGE_ROOTLESS:-0}" = "1" ]; then
++                    mv system/var/lib/lxc/android/system.img system/var/lib/lxc/android/android-rootfs.img
++                else
++                    sudo mv system/var/lib/lxc/android/system.img system/var/lib/lxc/android/android-rootfs.img
++                fi
+             fi
+ 
+             # Move things to data
+             cp partitions/* "$OUT" || true
+-            sudo rm -Rf partitions || true
++            if [ "${SYSTEM_IMAGE_ROOTLESS:-0}" = "1" ]; then
++                rm -Rf partitions || true
++            else
++                sudo rm -Rf partitions || true
++            fi
+ 
+             # Remove tarball to free up space, since device tarballs
+             # extract partitions/blobs that might fill up cache,
