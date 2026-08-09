@@ -10,30 +10,53 @@ If you'd like to contribute, please open an issue or submit a pull request it'd 
 ## What works:
 ---
 ✅ SSH
+
 ✅ USB tethering/MTP
+
 ✅ Display
+
 ✅ Touchscreen
+
 ✅ Audio
+
 ✅ Hardware acceleration
+
 ✅ basic X11 app support
+
 ✅ Internal storage
+
 ✅ Battery (Charging state, Level)
+
 ✅ OpenStore Apps
+
 ✅ I/O devices (Mouse, Keyboard tested)
+
 ✅ S Pen
+
 ✅ 24 Hour test
+
 ✅ 7 Day test
+
 ❌ Waydroid
+
 ❌ Haptics (Do work but cause a bootloop after some times, fails 24 hour test.)
+
 ❌ Camera
+
 ❌ Weather App
+
 ---
 ## Not tested:
 --- 
+
 ❌ VoLTE
+
 ❌ VoWiFi
+
 ❌ Messaging
+
 ❌ External storage
+
 ---
 
 - **Conclusion:** This device tree is a work in progress, not ready for daily use and isn't recommended. (Due to waydroid)
